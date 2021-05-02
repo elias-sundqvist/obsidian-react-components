@@ -1,6 +1,9 @@
 import typescript from '@rollup/plugin-typescript';
 import {nodeResolve} from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
+import copy from 'rollup-plugin-copy'
+import css from "rollup-plugin-import-css";
+import json from '@rollup/plugin-json';
 
 const isProd = (process.env.BUILD === 'production');
 
@@ -11,10 +14,12 @@ if you want to view the source visit the plugins github repository
 */
 `;
 
+const vault_plugin_dir = 'C:\\Users\\Elias\\Documents\\Obsidian Vaults\\AI Research\\.obsidian\\plugins\\obsidian-react-blocks'
+
 export default {
-  input: 'main.ts',
+  input: 'main.tsx',
   output: {
-    dir: '.',
+    dir: vault_plugin_dir,
     sourcemap: 'inline',
     sourcemapExcludeSources: isProd,
     format: 'cjs',
@@ -23,8 +28,15 @@ export default {
   },
   external: ['obsidian'],
   plugins: [
+    css(),
+    json(),
     typescript(),
     nodeResolve({browser: true}),
     commonjs(),
+    copy({
+      targets: [
+        { src: 'manifest.json', dest: vault_plugin_dir }
+      ]
+    })
   ]
 };
