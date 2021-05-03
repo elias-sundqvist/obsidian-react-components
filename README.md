@@ -1,5 +1,7 @@
 #Obsidian #Jsx #React #Functional #Components 
 
+[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/elias-sundqvist/obsidian-react-components?style=for-the-badge&sort=semver)](https://github.com/elias-sundqvist/obsidian-react-components/releases/latest)
+![GitHub All Releases](https://img.shields.io/github/downloads/elias-sundqvist/obsidian-react-components/total?style=for-the-badge)
 # Obsidian React Components
 
 This is a plugin for Obsidian (https://obsidian.md).
