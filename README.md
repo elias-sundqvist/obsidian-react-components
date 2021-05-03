@@ -29,17 +29,17 @@ Jsx code can be called both using full code blocks (using the `jsx-` environment
 
 As can be seen above, you can either include components using the block level (code environment) approach:  
 
-> <span>```jsx-</span>
->
-> `<Testcomponent source="Click Me!"/>`
->
-> <span>```</pre>
+````
+```jsx-
+<Testcomponent source="Click Me!"/>
+```
+````
 
 ... or using the inline code (with prefix) approach
 
-> ```md
-> A dice roller:  `jsx-<DiceRoller sides={10}/>`
-> ```
+```md
+A dice roller:  `jsx-<DiceRoller sides={10}/>`
+```
 
 The definitions for the example components used above can be found in the [Example Components](#Example-components) section further down. 
 
