@@ -1,4 +1,4 @@
-import { App, Modal, normalizePath, Notice, Plugin, PluginSettingTab, Setting, TAbstractFile, TFile, TFolder, Vault } from 'obsidian';
+import { App, MarkdownPostProcessorContext, normalizePath, Notice, Plugin, PluginSettingTab, Setting, TAbstractFile, TFile, TFolder, Vault } from 'obsidian';
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
 import Babel from '@babel/standalone';
@@ -17,44 +17,28 @@ export default class ReactBlocksPlugin extends Plugin {
 	codeBlocks: Map<string, string>
 	components: { [key: string]: (any)=>JSX.Element; }
 
-	async registerCodeBlock(file: TFile){
+	async registerComponent(file: TFile){
 		let content = await this.app.vault.read(file)
 		content = `props=>{${content}}`
-		let R = React, RD = ReactDOM, US=useState, UE=useEffect;
+		let scope = {...this.components, React, ReactDOM, useState, useEffect}
 		let transformedCode = Babel.transform(content, {presets: [ReactPreset]}).code
-		if(!(this.codeBlocks.has(file.basename) && this.codeBlocks[file.basename]==transformedCode)) {
-			this.codeBlocks[file.basename] = transformedCode
-			this.app.workspace.trigger('react-blocks:block-updated')
+		let code = Object.keys(scope).sort().map(k=>`let ${k}=scope.${k};`).join("\n")+"\n"+transformedCode;
+		if(!(this.codeBlocks.has(file.basename) && this.codeBlocks[file.basename]==code)) {
+			this.codeBlocks[file.basename] = code
+			this.app.workspace.trigger('react-components:component-updated')
 		}
-		((React, ReactDOM, useState, useEffect, components)=>{
-		let Component = props=>{
-			const [clCode, setClCode] = useState(this.codeBlocks[file.basename])
-			const Cl = eval(clCode)
-			return <Cl {...props}/>
-		}
+		let Component = eval(this.codeBlocks[file.basename])
 		this.components[file.basename]=Component;
-		this.registerMarkdownCodeBlockProcessor(file.basename, (source, el, ctx)=>{
-			let tryRender = () => {
-				try {
-					let Component = this.components[file.basename];
-					ReactDOM.render(<Component source={source} el={el} ctx={ctx}/>, el)
-				} catch(e) {
-					ReactDOM.render(<div style={{color: "red"}}>{e.toString()}</div>, el)
-				}
-			}
-			tryRender()
-			let evRef = this.app.workspace.on('react-blocks:block-updated', ()=>{if(el){tryRender()}else{this.app.workspace.offref(evRef)}})
-		})})(R, RD, US, UE, this.components)
 	}
 
-	loadCodeBlocks() {
+	loadComponents() {
 		if(this.settings.template_folder.trim()=="") {
 			new Notice("Cannot Load react components unless directory is set")
 		} else {
 			try {
 				let files = getTFilesFromFolder(this.app, this.settings.template_folder);
 				for (let file of files) {
-					this.registerCodeBlock(file);
+					this.registerComponent(file);
 				}
 			} catch(e){
 				new Notice("React Component Folder Not Found!")
@@ -62,14 +46,50 @@ export default class ReactBlocksPlugin extends Plugin {
 		}
 	}
 
+	async attachComponent(source: string, el:HTMLElement, ctx:MarkdownPostProcessorContext) {
+		let tryRender = () => {
+			try {
+				let scope = {...this.components, React, ReactDOM, useState, useEffect};
+				let transformedCode = Babel.transform(source, {presets: [ReactPreset]}).code;
+				let code = Object.keys(scope).map(k=>`let ${k}=scope.${k};`).join("\n")+"\n"+transformedCode;
+				let componentLiteral = eval(code);
+				ReactDOM.render(componentLiteral, el)
+			} catch(e) {
+				console.log(e)
+				ReactDOM.render(<div style={{color: "red"}}>{e.toString()}</div>, el)
+			}
+		}
+		tryRender()
+		let evRef = this.app.workspace.on('react-components:component-updated', ()=>{if(el){tryRender()}else{this.app.workspace.offref(evRef)}})
+	}
+
 	async onload() {
 		this.codeBlocks = new Map();
 		this.components = {};
 		await this.loadSettings();
-		let registerIfCodeBlockFile = (file)=>{if(this.settings.template_folder!="" && file.parent.path.startsWith(this.settings.template_folder)){this.registerCodeBlock(file)}}
+		let registerIfCodeBlockFile = (file)=>{if(this.settings.template_folder!="" && file.parent.path.startsWith(this.settings.template_folder)){this.registerComponent(file)}}
 		this.app.metadataCache.on('changed', registerIfCodeBlockFile)
 		this.app.metadataCache.on('resolve', registerIfCodeBlockFile)
-		this.app.workspace.on('layout-ready', ()=>this.loadCodeBlocks())
+		this.app.workspace.on('layout-ready', ()=>this.loadComponents())
+		this.registerMarkdownCodeBlockProcessor("jsx-", this.attachComponent.bind(this))
+		this.registerMarkdownPostProcessor(async (el, ctx) => {
+			let codeblocks = el.querySelectorAll("code");
+			let toReplace = []
+			for (let index = 0; index < codeblocks.length; index++) {
+				let codeblock = codeblocks.item(index);
+
+				let text = codeblock.innerText.trim();
+				if (!text.startsWith("jsx-")) continue;
+
+				let source = text.substring("jsx-".length).trim();
+				toReplace.push({codeblock, source})
+			}
+			toReplace.forEach(({codeblock, source})=>{
+				let container = document.createElement("span");
+				codeblock.replaceWith(container)
+				this.attachComponent(source, container, ctx)
+			})
+		});
 		this.addSettingTab(new ReactBlocksSettingTab(this.app, this));
 	}
 
@@ -124,12 +144,11 @@ class ReactBlocksSettingTab extends PluginSettingTab {
 
 		containerEl.empty();
 
-		containerEl.createEl('h2', {text: 'Settings for my awesome plugin.'});
+		containerEl.createEl('h2', {text: 'Obsidian React Components Settings'});
 
-		
 		new Setting(containerEl)
 			.setName("Components folder location")
-			.setDesc("Files in this folder will be available as code blocks.")
+			.setDesc("Files in this folder will be available as components/functions.")
 			.addText(text => {
 				text.setPlaceholder("Example: folder 1/folder 2")
 					.setValue(this.plugin.settings.template_folder)

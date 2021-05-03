@@ -1,57 +1,148 @@
-## Obsidian Sample Plugin
+#Obsidian #Jsx #React #Functional #Components 
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+# Obsidian React Components
 
-This project uses Typescript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in Typescript Definition format, which contains TSDoc comments describing what it does.
+This is a plugin for Obsidian (https://obsidian.md).
 
-**Note:** The Obsidian API is still in early alpha and is subject to change at any time!
+It allows you to write and use React components with Jsx inside your Obsidian notes. 
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Changes the default font color to red using `styles.css`.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open Sample Modal" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+## Demonstration
+![](images/demo.gif)
 
-### First time developing plugins?
+## Getting Started 
 
-Quick starting guide for new plugin devs:
+In order to use the plugin, you must first specify a folder for the Jsx functions / react components. 
 
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+![](images/settings.png)
 
-### Releasing new releases
+Every note in this directory will be interpreted as the content of a Jsx function (implicitly of the form `props=>{your code here}`)
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments.
-- Publish the release.
+Every file becomes a function/react component with the same name as the note. 
 
-### Adding your plugin to the community plugin list
+## Using Components
 
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+Jsx code can be called both using full code blocks (using the `jsx-` environment) or though inline code (with the prefix `jsx-`).
 
-### How to use
 
-- Clone this repo.
-- `npm i` or `yarn` to install dependencies
-- `npm run dev` to start compilation in watch mode.
 
-### Manually installing the plugin
+As can be seen above, you can either include components using the block level (code environment) approach:  
 
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+> <span>```jsx-</span>
+>
+> `<Testcomponent source="Click Me!"/>`
+>
+> <span>```</pre>
 
-### API Documentation
+... or using the inline code (with prefix) approach
 
-See https://github.com/obsidianmd/obsidian-api
+> ```md
+> A dice roller:  `jsx-<DiceRoller sides={10}/>`
+> ```
+
+The definitions for the example components used above can be found in the [Example Components](#Example-components) section further down. 
+
+## Writing Components
+
+The syntax for writing components is regular [Jsx Syntax](https://reactjs.org/docs/introducing-jsx.html)
+
+Each file is interpreted as a single function with the same name as the note file.  So if you, in obsidian, write the note `Clock` inside your components folder, then all other Jsx code blocks will get access to a corresponding new function/component `Clock`. 
+
+The content of your component file is implicitly wrapped in `props=>{...}`. This means that you *don't* write the function signature yourself. You *do*, however, need to include the `return` keywork in your code. 
+
+Other things to keep in mind:
+* Since the notes are interpreted as function variables, they must follow the javascript variable naming rules.
+    * Variable names cannot contain spaces.
+    * Variable names must begin with a letter, an underscore (_) or a dollar sign ($).
+    * Variable names can only contain letters, numbers, underscores, or dollar signs.
+    * Variable names are case-sensitive.
+    * Certain words may not be used as variable names, because they have other meanings within JavaScript. Check out this [complete list of the reserved words](https://www.dummies.com/cheatsheet/javascriptforkids).
+* In order to be used as a React component, the first letter of the function must be capitalized. 
+
+## Component Scope
+
+The react components have access to everything inside the global scope. (Use with caution, API changes could break your components).
+
+Besides this, the components have access to `React`, `ReactDOM`, `useState`, and `useEffect`. 
+This allows you to easily write functional components. 
+
+Besides that, `ctx`, which is the *file context* is also available. You can, for instance, get frontmatter data from here. Note, however, that the components don`t automatically refresh after the frontmatter is updated. 
+
+In the future, I would like to add an object that exposes useful variables and is more resilient to API changes. (similar to `tp` in the [Templater Plugin](https://github.com/SilentVoid13/Templater)). (See [Roadmap](#Roadmap))
+
+## Roadmap
+
+- [] Expose more useful variables to the component scope
+- [] Ensure that components are reloaded when relevant info is changed
+
+## Contributing
+
+Feel free to contribute.
+
+You can create an [issue](https://github.com/elias-sundqvist/obsidian-react-components/issues) to report a bug, suggest an improvement for this plugin, ask a question, etc.
+
+You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-components/pulls) to contribute to this plugin development.
+
+
+## Example components
+
+```jsx
+// file: Counter.md
+const [count, setCount] = useState(0)
+return (
+<div>
+  <p>You clicked me {count} times!!!</p>
+  <button onClick={() => setCount(count + 1)}>
+	{props.source}
+  </button>
+</div>
+)
+```
+
+```jsx
+// file: Clock.md
+ const [date, setDate] = useState(new Date());
+ useEffect(() => {
+  var timerID = setInterval( () => setDate(new Date()), 1000 );
+  return function cleanup() {
+      clearInterval(timerID);
+    };
+ });
+return (
+  <div>
+	<h1>Hello, world!</h1>
+	<h2>It is {date.toLocaleTimeString()}.</h2>
+  </div>
+); 
+```
+
+
+```jsx
+// file: rand.md
+return Math.random()
+```
+
+```jsx
+// file: DiceRoller.md
+let diceRoll = ()=>Math.ceil(rand()*props.sides)
+let [num, setNum] = useState(diceRoll())
+return (<span>
+	<button onClick={()=>setNum(diceRoll())}> Roll the {props.sides}-sided Die</button>
+	<span>The number is {num}</span>
+</span>)
+```
+
+```jsx
+// file: Testcomponent.md
+return (
+<div style={{color: "blue"}}>
+	<Clock/>
+	<Counter source={props.source}/>
+</div>
+)
+```
+
+
+
+## License
+
+[Obsidian React Components](https://github.com/elias-sundqvist/obsidian-react-components) is licensed under the GNU AGPLv3 license. Refer to [LICENSE](https://github.com/elias-sundqvist/obsidian-react-components/blob/master/LICENSE.TXT) for more information.
