@@ -15,28 +15,58 @@ interface ReactBlocksSettings {
 export default class ReactBlocksPlugin extends Plugin {
 	settings: ReactBlocksSettings;
 	codeBlocks: Map<string, string>
-	components: { [key: string]: (any)=>JSX.Element; }
+	components: Record<string, (any) => JSX.Element> = {}
+
+	getScope() {
+		const isPreviewMode = () => this.app.workspace.activeLeaf.view.getState() === "preview";
+		return {
+			...this.components,
+			React,
+			ReactDOM,
+			useState,
+			useEffect,
+			isPreviewMode
+		}
+	}
+
+	getScopeExpression(scope = this.getScope()) {
+		return Object.keys(scope).sort().map(k=>`let ${k}=scope.${k};`).join("\n")+"\n";
+	}
+
+	transpileCode(content: string) {
+		return Babel.transform(content, {presets: [ReactPreset]}).code
+	}
+
+	// evaluated code inherits the scope of the current function
+	evalAdapter(code: string, scope = this.getScope()) {
+		return eval(code)
+	}
 
 	async registerComponent(file: TFile){
-		let content = await this.app.vault.read(file)
-		content = `props=>{${content}}`
-		let scope = {...this.components, React, ReactDOM, useState, useEffect}
-		let transformedCode = Babel.transform(content, {presets: [ReactPreset]}).code
-		let code = Object.keys(scope).sort().map(k=>`let ${k}=scope.${k};`).join("\n")+"\n"+transformedCode;
+		const content = await this.app.vault.read(file)
+		const code = `props=>{
+			${this.getScopeExpression()}
+			${content}
+		}`
 		if(!(this.codeBlocks.has(file.basename) && this.codeBlocks[file.basename]==code)) {
 			this.codeBlocks[file.basename] = code
 			this.app.workspace.trigger('react-components:component-updated')
 		}
-		let Component = eval(this.codeBlocks[file.basename])
-		this.components[file.basename]=Component;
+		try {
+			this.components[file.basename] = this.evalAdapter(this.transpileCode(this.codeBlocks[file.basename]));
+		} catch (e) {
+			console.error(e)
+			console.log(`failed file: ${file.path}`)
+		}
 	}
 
 	loadComponents() {
+		this.components = {}
 		if(this.settings.template_folder.trim()=="") {
 			new Notice("Cannot Load react components unless directory is set")
 		} else {
 			try {
-				let files = getTFilesFromFolder(this.app, this.settings.template_folder);
+				let files = this.getTFilesFromFolder(this.settings.template_folder);
 				for (let file of files) {
 					this.registerComponent(file);
 				}
@@ -49,25 +79,37 @@ export default class ReactBlocksPlugin extends Plugin {
 	async attachComponent(source: string, el:HTMLElement, ctx:MarkdownPostProcessorContext) {
 		let tryRender = () => {
 			try {
-				let scope = {...this.components, React, ReactDOM, useState, useEffect};
-				let transformedCode = Babel.transform(source, {presets: [ReactPreset]}).code;
-				let code = Object.keys(scope).map(k=>`let ${k}=scope.${k};`).join("\n")+"\n"+transformedCode;
-				let componentLiteral = eval(code);
-				ReactDOM.render(componentLiteral, el)
+				const expr = `
+				${this.getScopeExpression()}
+				${source}
+				`
+				let evaluated = this.evalAdapter(this.transpileCode(expr))
+				ReactDOM.render(evaluated, el)
 			} catch(e) {
-				console.log(e)
+				console.error(e)
+				console.log(`failed file: ${ctx.sourcePath}`)
 				ReactDOM.render(<div style={{color: "red"}}>{e.toString()}</div>, el)
 			}
 		}
 		tryRender()
-		let evRef = this.app.workspace.on('react-components:component-updated', ()=>{if(el){tryRender()}else{this.app.workspace.offref(evRef)}})
+		let evRef = this.app.workspace.on('react-components:component-updated', ()=>{
+			if(el){
+				tryRender()
+			} else {
+				this.app.workspace.offref(evRef)
+			}
+		})
 	}
 
 	async onload() {
-		this.codeBlocks = new Map();
-		this.components = {};
 		await this.loadSettings();
-		let registerIfCodeBlockFile = (file)=>{if(this.settings.template_folder!="" && file.parent.path.startsWith(this.settings.template_folder)){this.registerComponent(file)}}
+		this.loadComponents()
+		this.codeBlocks = new Map();
+		let registerIfCodeBlockFile = (file) => {
+			if(this.settings.template_folder != "" && file.parent.path.startsWith(this.settings.template_folder)) {
+				this.registerComponent(file)
+			}
+		}
 		this.app.metadataCache.on('changed', registerIfCodeBlockFile)
 		this.app.metadataCache.on('resolve', registerIfCodeBlockFile)
 		this.app.workspace.on('layout-ready', ()=>this.loadComponents())
@@ -90,7 +132,7 @@ export default class ReactBlocksPlugin extends Plugin {
 				this.attachComponent(source, container, ctx)
 			})
 		});
-		this.addSettingTab(new ReactBlocksSettingTab(this.app, this));
+		this.addSettingTab(new ReactBlocksSettingTab(this));
 	}
 
 	onunload() {
@@ -104,38 +146,39 @@ export default class ReactBlocksPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+	getTFilesFromFolder(folder_str: string): Array<TFile> {
+		folder_str = normalizePath(folder_str);
+
+		let folder = this.app.vault.getAbstractFileByPath(folder_str);
+		if (!folder) {
+			throw new Error(`${folder_str} folder doesn't exist`);
+		}
+		if (!(folder instanceof TFolder)) {
+			throw new Error(`${folder_str} is a file, not a folder`);
+		}
+
+		let files: Array<TFile> = [];
+		Vault.recurseChildren(folder, (file: TAbstractFile) => {
+			if (file instanceof TFile) {
+				files.push(file);
+			}
+		});
+
+		files.sort((a, b) => {
+			return a.basename.localeCompare(b.basename);
+		});
+
+		return files;
+	}
 }
 
-function getTFilesFromFolder(app: App, folder_str: string): Array<TFile> {
-    folder_str = normalizePath(folder_str);
 
-    let folder = app.vault.getAbstractFileByPath(folder_str);
-    if (!folder) {
-        throw new Error(`${folder_str} folder doesn't exist`);
-    }
-    if (!(folder instanceof TFolder)) {
-        throw new Error(`${folder_str} is a file, not a folder`);
-    }
-
-    let files: Array<TFile> = [];
-    Vault.recurseChildren(folder, (file: TAbstractFile) => {
-        if (file instanceof TFile) {
-            files.push(file);
-        }
-    });
-
-    files.sort((a, b) => {
-        return a.basename.localeCompare(b.basename);
-    });
-
-    return files;
-}
 
 class ReactBlocksSettingTab extends PluginSettingTab {
 	plugin: ReactBlocksPlugin;
 
-	constructor(app: App, plugin: ReactBlocksPlugin) {
-		super(app, plugin);
+	constructor(plugin: ReactBlocksPlugin) {
+		super(plugin.app, plugin);
 		this.plugin = plugin;
 	}
 
@@ -154,6 +197,7 @@ class ReactBlocksSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.template_folder)
 					.onChange((new_folder) => {
 						this.plugin.settings.template_folder = new_folder;
+						this.plugin.loadComponents()
 						this.plugin.saveSettings();
 					})
 			});
