@@ -37,14 +37,24 @@ export default class ReactBlocksPlugin extends Plugin {
 
     getScope() {
         const isPreviewMode = () => this.app.workspace.activeLeaf.view.getState() === 'preview';
-        return {
-            ...this.components,
+        const scope = {
             React,
             ReactDOM,
             useState,
             useEffect,
             isPreviewMode
         };
+        // Prevent stale component references
+        const components = this.components;
+        for (const componentName of Object.keys(components)) {
+            Object.defineProperty(scope, componentName, {
+                get: function () {
+                    return components[componentName];
+                },
+                enumerable: true
+            });
+        }
+        return scope;
     }
 
     getScopeExpression(scope = this.getScope()) {
