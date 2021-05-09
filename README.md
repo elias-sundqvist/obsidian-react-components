@@ -67,12 +67,7 @@ This allows you to easily write functional components.
 
 Besides that, `ctx`, which is the *file context* is also available. You can, for instance, get frontmatter data from here. Note, however, that the components don`t automatically refresh after the frontmatter is updated. 
 
-In the future, I would like to add an object that exposes useful variables and is more resilient to API changes. (similar to `tp` in the [Templater Plugin](https://github.com/SilentVoid13/Templater)). (See [Roadmap](#Roadmap))
-
-## Roadmap
-
-- [] Expose more useful variables to the component scope
-- [] Ensure that components are reloaded when relevant info is changed
+In the future, I would like to add an object that exposes useful variables and is more resilient to API changes. (similar to `tp` in the [Templater Plugin](https://github.com/SilentVoid13/Templater)).
 
 ## Contributing
 
@@ -81,6 +76,22 @@ Feel free to contribute.
 You can create an [issue](https://github.com/elias-sundqvist/obsidian-react-components/issues) to report a bug, suggest an improvement for this plugin, ask a question, etc.
 
 You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-components/pulls) to contribute to this plugin development.
+
+
+## Changelog
+
+### 0.0.2 (2021-05-10) *New functionality, bug fixes, and refactoring*
+* @lucasew Added an `isPreviewMode` function to the component scope. (PR #5)
+  > There is a rule that in React you must call the same hooks at every render so early returns are not good.
+  > 
+  > The user can easily check if the note is on preview mode inside its component and can return null if it's the case.
+
+* Components which contain sub-components are now correctly updated when the sub-component code is modified. (PR #11)
+
+* Users are now warned when creating components with invalid names (PR #10)
+
+### 0.0.1 (2021-05-04) *First Release*
+* Basic functionality of the plugin implemented
 
 
 ## Example components
