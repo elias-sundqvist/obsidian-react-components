@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "description": "This is a plugin for Obsidian (https://obsidian.md). It allows you to write and use React components with Jsx inside your Obsidian notes.",
   "main": "main.js",
-  "scripts": {    
+  "scripts": {
     "prettier-format": "prettier --config .prettierrc.js *.tsx --write",
     "lint": "eslint . --ext .ts,.tsx",
     "dev": "rollup --config rollup.config.js -w",
@@ -38,6 +38,7 @@
     "@types/react": "^17.0.4",
     "@types/react-dom": "^17.0.3",
     "@types/styled-components": "^5.1.9",
+    "is-var-name": "^2.0.0",
     "react": "^17.0.2",
     "react-dom": "^17.0.2",
     "react-jsx-parser": "^1.28.3",

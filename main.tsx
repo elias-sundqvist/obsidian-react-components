@@ -14,6 +14,7 @@ import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
 import Babel from '@babel/standalone';
 import ReactPreset from '@babel/preset-react';
+import isVarName from 'is-var-name';
 
 declare module 'obsidian' {
     interface Workspace {
@@ -66,11 +67,13 @@ export default class ReactBlocksPlugin extends Plugin {
     }
 
     async registerComponent(file: TFile) {
+        if (!isVarName(file.basename)) {
+            new Notice(`"${file.basename}" is not a valid function name`);
+            return;
+        }
+
         const content = await this.app.vault.read(file);
-        const code = `props=>{
-			${this.getScopeExpression()}
-			${content}
-		}`;
+        const code = `props=>{\n${this.getScopeExpression()}\n${content}}`;
         if (!(this.codeBlocks.has(file.basename) && this.codeBlocks[file.basename] == code)) {
             this.codeBlocks[file.basename] = code;
             this.app.workspace.trigger('react-components:component-updated');
