@@ -1,5 +1,6 @@
 import {
     MarkdownPostProcessorContext,
+    MarkdownView,
     normalizePath,
     Notice,
     Plugin,
@@ -36,7 +37,7 @@ export default class ReactBlocksPlugin extends Plugin {
     components: Record<string, (any) => JSX.Element> = {};
 
     getScope() {
-        const isPreviewMode = () => this.app.workspace.activeLeaf.view.getState() === 'preview';
+        const isPreviewMode = () => this.app.workspace.getActiveViewOfType(MarkdownView)?.getState() === 'preview';
         const scope = {
             React,
             ReactDOM,
@@ -77,6 +78,11 @@ export default class ReactBlocksPlugin extends Plugin {
     }
 
     async registerComponent(file: TFile) {
+        if (file.extension != "md") {
+            new Notice(`"${file.basename}.${file.extension}" is not a markdown file`);
+            return;
+        }
+
         if (!isVarName(file.basename)) {
             new Notice(`"${file.basename}" is not a valid function name`);
             return;
@@ -143,9 +149,9 @@ export default class ReactBlocksPlugin extends Plugin {
                 this.registerComponent(file);
             }
         };
-        this.app.metadataCache.on('changed', registerIfCodeBlockFile);
-        this.app.metadataCache.on('resolve', registerIfCodeBlockFile);
-        this.app.workspace.on('layout-ready', () => this.loadComponents());
+        this.registerEvent(this.app.metadataCache.on('changed', registerIfCodeBlockFile));
+        this.registerEvent(this.app.metadataCache.on('resolve', registerIfCodeBlockFile));
+        this.registerEvent(this.app.workspace.on('layout-ready', () => this.loadComponents()));
         this.registerMarkdownCodeBlockProcessor('jsx-', this.attachComponent.bind(this));
         this.registerMarkdownPostProcessor(async (el, ctx) => {
             const codeblocks = el.querySelectorAll('code');
