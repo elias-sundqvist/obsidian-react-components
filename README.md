@@ -47,7 +47,7 @@ The syntax for writing components is regular [Jsx Syntax](https://reactjs.org/do
 
 Each file is interpreted as a single function with the same name as the note file.  So if you, in obsidian, write the note `Clock` inside your components folder, then all other Jsx code blocks will get access to a corresponding new function/component `Clock`. 
 
-The content of your component file is implicitly wrapped in `props=>{...}`. This means that you *don't* write the function signature yourself. You *do*, however, need to include the `return` keywork in your code. 
+The content of your component file is implicitly wrapped in `props=>{...}`. This means that you *don't* write the function signature yourself. You *do*, however, need to include the `return` keyword in your code. 
 
 Other things to keep in mind:
 * Since the notes are interpreted as function variables, they must follow the javascript variable naming rules.
@@ -79,6 +79,14 @@ You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-
 
 
 ## Changelog
+
+### 0.0.3 (2021-05-10) *Markdown rendering component, more hooks, and minor fixes*
+
+* Made some minor fixes based on feedback in the [community-plugins PR](https://github.com/obsidianmd/obsidian-releases/pull/280)
+* Added a `Markdown` component, which can be used to render makdown.
+  * Usage: ``` `jsx-<Markdown src={"* This is a bullet"}/>` ```
+* Added `obsidian` to the component scope
+* Added more hooks: `useCallback`, `useContext`, `useMemo`, `useReducer`, `useRef`
 
 ### 0.0.2 (2021-05-10) *New functionality, bug fixes, and refactoring*
 * @lucasew Added an `isPreviewMode` function to the component scope. (PR #5)
