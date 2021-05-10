@@ -1,6 +1,7 @@
 import {
     MarkdownPostProcessorContext,
     MarkdownView,
+    MarkdownRenderer,
     normalizePath,
     Notice,
     Plugin,
@@ -11,7 +12,8 @@ import {
     TFolder,
     Vault
 } from 'obsidian';
-import React, { useEffect, useState } from 'react';
+import * as obsidian from 'obsidian';
+import React, { useEffect, useState, useCallback, useContext, useMemo, useReducer, useRef, createContext } from 'react';
 import ReactDOM from 'react-dom';
 import Babel from '@babel/standalone';
 import ReactPreset from '@babel/preset-react';
@@ -22,6 +24,20 @@ declare module 'obsidian' {
         on(name: 'react-components:component-updated', callback: () => void): EventRef;
     }
 }
+
+type ReactComponentContextData = {
+    markdownPostProcessorContext: MarkdownPostProcessorContext;
+};
+
+const ReactComponentContext = createContext<ReactComponentContextData>(null);
+const Markdown = ({ src }: { src: string }) => {
+    const ctx = useContext(ReactComponentContext);
+    const containerRef = useRef();
+    useEffect(() => {
+        MarkdownRenderer.renderMarkdown(src, containerRef.current, ctx.markdownPostProcessorContext.sourcePath, null);
+    }, [ctx]);
+    return <span ref={containerRef}></span>;
+};
 
 const DEFAULT_SETTINGS: ReactBlocksSettings = {
     template_folder: ''
@@ -39,10 +55,18 @@ export default class ReactBlocksPlugin extends Plugin {
     getScope() {
         const isPreviewMode = () => this.app.workspace.getActiveViewOfType(MarkdownView)?.getState() === 'preview';
         const scope = {
+            Markdown,
+            ReactComponentContext,
             React,
             ReactDOM,
             useState,
             useEffect,
+            useCallback,
+            useContext,
+            useMemo,
+            useReducer,
+            useRef,
+            obsidian,
             isPreviewMode
         };
         // Prevent stale component references
@@ -78,7 +102,7 @@ export default class ReactBlocksPlugin extends Plugin {
     }
 
     async registerComponent(file: TFile) {
-        if (file.extension != "md") {
+        if (file.extension != 'md') {
             new Notice(`"${file.basename}.${file.extension}" is not a markdown file`);
             return;
         }
@@ -118,12 +142,22 @@ export default class ReactBlocksPlugin extends Plugin {
         }
     }
 
+    generateReactComponentContext(ctx: MarkdownPostProcessorContext): ReactComponentContextData {
+        return {
+            markdownPostProcessorContext: ctx
+        };
+    }
+
     async attachComponent(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
         const tryRender = () => {
             try {
                 const expr = `${this.getScopeExpression()}\n${source}`;
                 const evaluated = this.evalAdapter(this.transpileCode(expr));
-                ReactDOM.render(evaluated, el);
+                const context = this.generateReactComponentContext(ctx);
+                ReactDOM.render(
+                    <ReactComponentContext.Provider value={context}>{evaluated}</ReactComponentContext.Provider>,
+                    el
+                );
             } catch (e) {
                 console.error(e);
                 console.log(`failed file: ${ctx.sourcePath}`);
