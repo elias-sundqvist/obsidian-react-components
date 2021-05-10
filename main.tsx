@@ -53,7 +53,7 @@ export default class ReactBlocksPlugin extends Plugin {
     components: Record<string, (any) => JSX.Element> = {};
 
     getScope() {
-        const isPreviewMode = () => this.app.workspace.getActiveViewOfType(MarkdownView)?.getState() === 'preview';
+        const isPreviewMode = () => this.app.workspace.getActiveViewOfType(MarkdownView)?.getMode() === 'preview';
         const scope = {
             Markdown,
             ReactComponentContext,
