@@ -1,6 +1,6 @@
 {
   "name": "obsidian-react-components",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "This is a plugin for Obsidian (https://obsidian.md). It allows you to write and use React components with Jsx inside your Obsidian notes.",
   "main": "main.js",
   "scripts": {

@@ -80,6 +80,27 @@ You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-
 
 ## Changelog
 
+### 0.0.4 (2021-05-20) *Improved Component Loading and Error Handling + useIsPreview*
+
+* Add a new setting to disable component refreshing 
+  * Useful if re-rendering of components is costly, such as if the component makes API calls.
+* Make component loading more reliable (Resolves issue #13)
+* Significantly improve error handling
+  * All errors are rendered as react components. You can click a button in the component to show the error in the console. 
+* Add a command to manually refresh components
+  * `Obsidian React Components: Refresh React Components`
+* Replace `isPreviewMode` with `useIsPreview`, which check the current pane of the component instead of the currently active component (Resolves issue #12)
+  
+  Example:
+ 
+    ```js
+    const isPreview = useIsPreview()
+    if(isPreview) {
+      // this only happens if the pane which the component is attached to is in preview mode.
+    }
+    ```
+
+
 ### 0.0.3 (2021-05-10) *Markdown rendering component, more hooks, and minor fixes*
 
 * Made some minor fixes based on feedback in the [community-plugins PR](https://github.com/obsidianmd/obsidian-releases/pull/280)
