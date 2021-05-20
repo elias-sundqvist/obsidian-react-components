@@ -1,6 +1,5 @@
 import {
     MarkdownPostProcessorContext,
-    MarkdownView,
     MarkdownRenderer,
     normalizePath,
     Notice,
@@ -23,6 +22,10 @@ declare module 'obsidian' {
     interface Workspace {
         on(name: 'react-components:component-updated', callback: () => void): EventRef;
     }
+
+    interface MarkdownPostProcessorContext {
+        containerEl?: HTMLElement;
+    }
 }
 
 type ReactComponentContextData = {
@@ -32,28 +35,46 @@ type ReactComponentContextData = {
 const ReactComponentContext = createContext<ReactComponentContextData>(null);
 const Markdown = ({ src }: { src: string }) => {
     const ctx = useContext(ReactComponentContext);
-    const containerRef = useRef();
+    const containerRef = useRef<HTMLElement>();
     useEffect(() => {
+        containerRef.current.innerHTML = '';
         MarkdownRenderer.renderMarkdown(src, containerRef.current, ctx.markdownPostProcessorContext.sourcePath, null);
     }, [ctx]);
     return <span ref={containerRef}></span>;
 };
 
 const DEFAULT_SETTINGS: ReactBlocksSettings = {
-    template_folder: ''
+    template_folder: '',
+    auto_refresh: true
 };
 
 interface ReactBlocksSettings {
     template_folder: string;
+    auto_refresh: boolean;
 }
+
+const ErrorComponent = ({ componentName, error }: { componentName: string; error: Error }) => (
+    <span style={{ color: 'red' }}>
+        {`Error in component "${componentName}": ${error.toString()}`}
+        <button onClick={() => console.error(error)}>Show In Console</button>
+    </span>
+);
 
 export default class ReactBlocksPlugin extends Plugin {
     settings: ReactBlocksSettings;
-    codeBlocks: Map<string, string>;
+    codeBlocks: Map<string, () => string>;
     components: Record<string, (any) => JSX.Element> = {};
 
     getScope() {
-        const isPreviewMode = () => this.app.workspace.getActiveViewOfType(MarkdownView)?.getMode() === 'preview';
+        const useIsPreview = () => {
+            const ctx = useContext(ReactComponentContext);
+            return (
+                ctx.markdownPostProcessorContext.containerEl
+                    .closest('.workspace-leaf-content')
+                    .getAttribute('data-mode') === 'preview'
+            );
+        };
+
         const scope = {
             Markdown,
             ReactComponentContext,
@@ -66,8 +87,8 @@ export default class ReactBlocksPlugin extends Plugin {
             useMemo,
             useReducer,
             useRef,
-            obsidian,
-            isPreviewMode
+            useIsPreview,
+            obsidian
         };
         // Prevent stale component references
         const components = this.components;
@@ -98,7 +119,18 @@ export default class ReactBlocksPlugin extends Plugin {
     // evaluated code inherits the scope of the current function
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     evalAdapter(code: string, scope = this.getScope()) {
-        return eval(code);
+        const evaluated = eval(code);
+        if (typeof evaluated == 'function') {
+            return (...args) => {
+                try {
+                    return evaluated(...args);
+                } catch (e) {
+                    return e.toString();
+                }
+            };
+        } else {
+            return evaluated;
+        }
     }
 
     async registerComponent(file: TFile) {
@@ -113,20 +145,33 @@ export default class ReactBlocksPlugin extends Plugin {
         }
 
         const content = await this.app.vault.read(file);
-        const code = `props=>{\n${this.getScopeExpression()}\n${content}}`;
-        if (!(this.codeBlocks.has(file.basename) && this.codeBlocks[file.basename] == code)) {
-            this.codeBlocks[file.basename] = code;
-            this.app.workspace.trigger('react-components:component-updated');
+        const code = () => `props=>{\n${this.getScopeExpression()}\n${content}}`;
+        const codeString = code();
+        if (!(this.codeBlocks.has(file.basename) && this.codeBlocks.get(file.basename)() == codeString)) {
+            this.codeBlocks.set(file.basename, code);
+            this.refreshComponentScope();
+            if (this.settings.auto_refresh) {
+                this.app.workspace.trigger('react-components:component-updated');
+            }
         }
         try {
-            this.components[file.basename] = this.evalAdapter(this.transpileCode(this.codeBlocks[file.basename]));
+            this.components[file.basename] = this.evalAdapter(this.transpileCode(this.codeBlocks.get(file.basename)()));
         } catch (e) {
-            console.error(e);
-            console.log(`failed file: ${file.path}`);
+            this.components[file.basename] = () => ErrorComponent({ componentName: file.basename, error: e });
         }
     }
 
-    loadComponents() {
+    refreshComponentScope() {
+        for (const [name, codef] of this.codeBlocks) {
+            try {
+                this.components[name] = this.evalAdapter(this.transpileCode(codef()));
+            } catch (e) {
+                this.components[name] = () => ErrorComponent({ componentName: name, error: e });
+            }
+        }
+    }
+
+    async loadComponents() {
         this.components = {};
         if (this.settings.template_folder.trim() == '') {
             new Notice('Cannot Load react components unless directory is set');
@@ -134,7 +179,11 @@ export default class ReactBlocksPlugin extends Plugin {
             try {
                 const files = this.getTFilesFromFolder(this.settings.template_folder);
                 for (const file of files) {
-                    this.registerComponent(file);
+                    await this.registerComponent(file);
+                }
+                this.refreshComponentScope();
+                if (this.settings.auto_refresh) {
+                    this.app.workspace.trigger('react-components:component-updated');
                 }
             } catch (e) {
                 new Notice('React Component Folder Not Found!');
@@ -151,22 +200,20 @@ export default class ReactBlocksPlugin extends Plugin {
     async attachComponent(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
         const tryRender = () => {
             try {
+                const context = this.generateReactComponentContext(ctx);
                 const expr = `${this.getScopeExpression()}\n${source}`;
                 const evaluated = this.evalAdapter(this.transpileCode(expr));
-                const context = this.generateReactComponentContext(ctx);
                 ReactDOM.render(
                     <ReactComponentContext.Provider value={context}>{evaluated}</ReactComponentContext.Provider>,
                     el
                 );
             } catch (e) {
-                console.error(e);
-                console.log(`failed file: ${ctx.sourcePath}`);
-                ReactDOM.render(<div style={{ color: 'red' }}>{e.toString()}</div>, el);
+                ReactDOM.render(<ErrorComponent componentName={source} error={e} />, el);
             }
         };
         tryRender();
         const evRef = this.app.workspace.on('react-components:component-updated', () => {
-            if (el) {
+            if (el && document.contains(el)) {
                 tryRender();
             } else {
                 this.app.workspace.offref(evRef);
@@ -176,13 +223,21 @@ export default class ReactBlocksPlugin extends Plugin {
 
     async onload() {
         await this.loadSettings();
-        this.loadComponents();
+        await this.loadComponents();
         this.codeBlocks = new Map();
         const registerIfCodeBlockFile = file => {
             if (this.settings.template_folder != '' && file.parent.path.startsWith(this.settings.template_folder)) {
                 this.registerComponent(file);
             }
         };
+        this.addCommand({
+            id: 'refresh-react-components',
+            name: 'Refresh React Components',
+            callback: async () => {
+                await this.loadComponents();
+                this.app.workspace.trigger('react-components:component-updated');
+            }
+        });
         this.registerEvent(this.app.metadataCache.on('changed', registerIfCodeBlockFile));
         this.registerEvent(this.app.metadataCache.on('resolve', registerIfCodeBlockFile));
         this.registerEvent(this.app.workspace.on('layout-ready', () => this.loadComponents()));
@@ -272,6 +327,18 @@ class ReactBlocksSettingTab extends PluginSettingTab {
                         this.plugin.loadComponents();
                         this.plugin.saveSettings();
                     });
+            });
+
+        new Setting(containerEl)
+            .setName('Automatically Refresh Components')
+            .setDesc(
+                'Useful to disable if reloading components is costly (like if they perform api calls or read a lot of files). To refresh the components manually, run the `Refresh React Components` command'
+            )
+            .addToggle(toggle => {
+                toggle.setValue(this.plugin.settings.auto_refresh).onChange(auto_refresh => {
+                    this.plugin.settings.auto_refresh = auto_refresh;
+                    this.plugin.saveSettings();
+                });
             });
     }
 }
