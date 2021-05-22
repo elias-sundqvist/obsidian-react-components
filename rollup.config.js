@@ -4,6 +4,7 @@ import commonjs from '@rollup/plugin-commonjs';
 import copy from 'rollup-plugin-copy'
 import css from "rollup-plugin-import-css";
 import json from '@rollup/plugin-json';
+import fs from 'fs';
 
 const isProd = (process.env.BUILD === 'production');
 
@@ -14,7 +15,9 @@ if you want to view the source visit the plugins github repository
 */
 `;
 
-const vault_plugin_dir = process.env.VAULT_PLUGIN_DIR || '.'
+const vault_plugin_dir = fs.existsSync('./.vault_plugin_dir') ? 
+                         fs.readFileSync('./.vault_plugin_dir').toString() : 
+                         '.';
 
 export default {
   input: 'main.tsx',

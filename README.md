@@ -80,6 +80,11 @@ You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-
 
 ## Changelog
 
+### 0.0.5 (2021-05-22) *Enable dynamic updates of Markdown Rendering component, minor changes*
+
+* Updating the `src` prop of the `Markdown` component previously did not cause the component to rerender. This is now fixed.
+* For developers: you can now create a `.vault_plugin_dir` file containing the path to the plugin in your vault: (e.g. `path\to\my\vault\.obsidian\plugins\obsidian-react-components`). Then `yarn build` will automatically copy the compiled files to the correct place. So you only have to reload the plugin in Obsidian to see changes take effect.
+
 ### 0.0.4 (2021-05-20) *Improved Component Loading and Error Handling + useIsPreview*
 
 * Add a new setting to disable component refreshing 

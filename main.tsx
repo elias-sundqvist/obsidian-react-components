@@ -39,7 +39,7 @@ const Markdown = ({ src }: { src: string }) => {
     useEffect(() => {
         containerRef.current.innerHTML = '';
         MarkdownRenderer.renderMarkdown(src, containerRef.current, ctx.markdownPostProcessorContext.sourcePath, null);
-    }, [ctx]);
+    }, [ctx, src]);
     return <span ref={containerRef}></span>;
 };
 
