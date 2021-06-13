@@ -12,11 +12,12 @@ import {
     Vault
 } from 'obsidian';
 import * as obsidian from 'obsidian';
-import React, { useEffect, useState, useCallback, useContext, useMemo, useReducer, useRef, createContext } from 'react';
-import ReactDOM from 'react-dom';
+import { default as OfflineReact } from 'react';
+import { default as OfflineReactDOM } from 'react-dom';
 import Babel from '@babel/standalone';
 import ReactPreset from '@babel/preset-react';
 import isVarName from 'is-var-name';
+import reactToWebComponent from './react-webcomponent';
 
 declare module 'obsidian' {
     interface Workspace {
@@ -32,17 +33,6 @@ type ReactComponentContextData = {
     markdownPostProcessorContext: MarkdownPostProcessorContext;
 };
 
-const ReactComponentContext = createContext<ReactComponentContextData>(null);
-const Markdown = ({ src }: { src: string }) => {
-    const ctx = useContext(ReactComponentContext);
-    const containerRef = useRef<HTMLElement>();
-    useEffect(() => {
-        containerRef.current.innerHTML = '';
-        MarkdownRenderer.renderMarkdown(src, containerRef.current, ctx.markdownPostProcessorContext.sourcePath, null);
-    }, [ctx, src]);
-    return <span ref={containerRef}></span>;
-};
-
 const DEFAULT_SETTINGS: ReactBlocksSettings = {
     template_folder: '',
     auto_refresh: true
@@ -53,21 +43,75 @@ interface ReactBlocksSettings {
     auto_refresh: boolean;
 }
 
-const ErrorComponent = ({ componentName, error }: { componentName: string; error: Error }) => (
-    <span style={{ color: 'red' }}>
-        {`Error in component "${componentName}": ${error.toString()}`}
-        <button onClick={() => console.error(error)}>Show In Console</button>
-    </span>
-);
-
 export default class ReactBlocksPlugin extends Plugin {
     settings: ReactBlocksSettings;
     codeBlocks: Map<string, () => string>;
     components: Record<string, (any) => JSX.Element> = {};
+    webComponents: Record<string, string>;
+    React: typeof OfflineReact = OfflineReact;
+    ReactDOM: typeof OfflineReactDOM = OfflineReactDOM;
+
+    ReactComponentContext: OfflineReact.Context<ReactComponentContextData>;
+    Markdown = ({ src }: { src: string }) => {
+        const React = this.React;
+        const { useContext, useRef, useEffect } = React;
+        const ctx = useContext(this.ReactComponentContext);
+        const containerRef = useRef<HTMLElement>();
+        useEffect(() => {
+            containerRef.current.innerHTML = '';
+            MarkdownRenderer.renderMarkdown(
+                src,
+                containerRef.current,
+                ctx.markdownPostProcessorContext.sourcePath,
+                null
+            );
+        }, [ctx, src]);
+        return <span ref={containerRef}></span>;
+    };
+
+    ErrorComponent = ({ componentName, error }: { componentName: string; error: Error }) => {
+        const React = this.React;
+        return (
+            <span style={{ color: 'red' }}>
+                {`Error in component "${componentName}": ${error.toString()}`}
+                <button onClick={() => console.error(error)}>Show In Console</button>
+            </span>
+        );
+    };
+
+    // eslint-disable-next-line react/display-name
+    webComponentBase = tagName => props => {
+        const React = this.React;
+        const { useState, useEffect } = React;
+        const setRefresh = useState<number>()[1];
+        const [component, setComponent] = useState<string>();
+
+        const Component = component ? this.components[component] : () => <h1>Nothing Here Yet</h1>;
+
+        useEffect(() => {
+            setComponent(this.webComponents[tagName]);
+            console.log('Här vet vi att den hamnar');
+            this.app.workspace.on('react-components:component-updated', () => {
+                console.log('den måste ju hamna här!');
+                setComponent(this.webComponents[tagName]);
+                setRefresh(Math.random());
+            });
+        }, []);
+
+        const context = this.generateReactComponentContext(null);
+        return (
+            <this.ReactComponentContext.Provider value={context}>
+                <Component {...props} />
+            </this.ReactComponentContext.Provider>
+        );
+    };
 
     getScope() {
+        const React = this.React;
+        const ReactDOM = this.ReactDOM;
+        const { useState, useEffect, useContext, useCallback, useMemo, useReducer, useRef } = React;
         const useIsPreview = () => {
-            const ctx = useContext(ReactComponentContext);
+            const ctx = useContext(this.ReactComponentContext);
             return (
                 ctx.markdownPostProcessorContext.containerEl
                     .closest('.workspace-leaf-content')
@@ -76,8 +120,8 @@ export default class ReactBlocksPlugin extends Plugin {
         };
 
         const scope = {
-            Markdown,
-            ReactComponentContext,
+            Markdown: this.Markdown,
+            ReactComponentContext: this.ReactComponentContext,
             React,
             ReactDOM,
             useState,
@@ -118,8 +162,11 @@ export default class ReactBlocksPlugin extends Plugin {
 
     // evaluated code inherits the scope of the current function
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    evalAdapter(code: string, scope = this.getScope()) {
-        const evaluated = eval(code);
+    async evalAdapter(code: string, scope = this.getScope()) {
+        const encodedCode = `data:text/javascript;base64,${btoa(code)}`;
+        //console.log({encodedCode})
+        //console.log({toEval: `import(\`${encodedCode}\`)`})
+        const evaluated = (await eval(`import(\`${encodedCode}\`)`)).default(scope, this.transpileCode.bind(this));
         if (typeof evaluated == 'function') {
             return (...args) => {
                 try {
@@ -131,6 +178,37 @@ export default class ReactBlocksPlugin extends Plugin {
         } else {
             return evaluated;
         }
+    }
+
+    registerWebComponent(componentTag: string) {
+        customElements.define(
+            componentTag,
+            reactToWebComponent(this.webComponentBase(componentTag), this.React, this.ReactDOM)
+        );
+    }
+
+    wrapCode(content: string) {
+        const importsRegexp = /^\s*import\s(.|\s)*?\sfrom\s.*?$/gm;
+        const imports = [];
+        content = content.replaceAll(importsRegexp, match => {
+            imports.push(match.trim());
+            return '';
+        });
+        return `${imports.join('\n')}\nexport default scope=>props=>{\n${this.getScopeExpression()}\n${content}}`;
+    }
+
+    wrapInNoteCode(content: string) {
+        const importsRegexp = /^\s*import\s(.|\s)*?\sfrom\s.*?$/gm;
+        const imports = [];
+        content = content.replaceAll(importsRegexp, match => {
+            imports.push(match.trim());
+            return '';
+        });
+        return `${imports.join(
+            '\n'
+        )}\nexport default (scope, transpile)=>{\n${this.getScopeExpression()}\n return eval(transpile(JSON.parse(${JSON.stringify(
+            JSON.stringify(content)
+        )})))}`;
     }
 
     async registerComponent(file: TFile) {
@@ -145,34 +223,50 @@ export default class ReactBlocksPlugin extends Plugin {
         }
 
         const content = await this.app.vault.read(file);
-        const code = () => `props=>{\n${this.getScopeExpression()}\n${content}}`;
+        const webComponentRegex = /^\s*\/\/\s*web-component:\s*([a-z][a-z0-9-]*)/g;
+        //console.log({content, webComponentRegex})
+        const matches = webComponentRegex.exec(content);
+        if (matches?.length > 1) {
+            const componentTag = matches[1];
+            const wasRegistered = !!this.webComponents[componentTag];
+            this.webComponents[componentTag] = file.basename;
+            console.log(`regestering component ${componentTag}`);
+            if (!wasRegistered) {
+                this.registerWebComponent(componentTag);
+            }
+        }
+
+        const code = () => this.wrapCode(content);
         const codeString = code();
         if (!(this.codeBlocks.has(file.basename) && this.codeBlocks.get(file.basename)() == codeString)) {
             this.codeBlocks.set(file.basename, code);
-            this.refreshComponentScope();
+            await this.refreshComponentScope();
             if (this.settings.auto_refresh) {
                 this.app.workspace.trigger('react-components:component-updated');
             }
         }
         try {
-            this.components[file.basename] = this.evalAdapter(this.transpileCode(this.codeBlocks.get(file.basename)()));
+            this.components[file.basename] = await this.evalAdapter(
+                this.transpileCode(this.codeBlocks.get(file.basename)())
+            );
         } catch (e) {
-            this.components[file.basename] = () => ErrorComponent({ componentName: file.basename, error: e });
+            this.components[file.basename] = () => this.ErrorComponent({ componentName: file.basename, error: e });
         }
     }
 
-    refreshComponentScope() {
+    async refreshComponentScope() {
         for (const [name, codef] of this.codeBlocks) {
             try {
-                this.components[name] = this.evalAdapter(this.transpileCode(codef()));
+                this.components[name] = await this.evalAdapter(this.transpileCode(codef()));
             } catch (e) {
-                this.components[name] = () => ErrorComponent({ componentName: name, error: e });
+                this.components[name] = () => this.ErrorComponent({ componentName: name, error: e });
             }
         }
     }
 
     async loadComponents() {
         this.components = {};
+        this.webComponents = {};
         if (this.settings.template_folder.trim() == '') {
             new Notice('Cannot Load react components unless directory is set');
         } else {
@@ -181,7 +275,7 @@ export default class ReactBlocksPlugin extends Plugin {
                 for (const file of files) {
                     await this.registerComponent(file);
                 }
-                this.refreshComponentScope();
+                await this.refreshComponentScope();
                 if (this.settings.auto_refresh) {
                     this.app.workspace.trigger('react-components:component-updated');
                 }
@@ -198,23 +292,25 @@ export default class ReactBlocksPlugin extends Plugin {
     }
 
     async attachComponent(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
-        const tryRender = () => {
+        const tryRender = async () => {
+            const React = this.React;
             try {
                 const context = this.generateReactComponentContext(ctx);
-                const expr = `${this.getScopeExpression()}\n${source}`;
-                const evaluated = this.evalAdapter(this.transpileCode(expr));
-                ReactDOM.render(
-                    <ReactComponentContext.Provider value={context}>{evaluated}</ReactComponentContext.Provider>,
+                const evaluated = await this.evalAdapter(this.transpileCode(this.wrapInNoteCode(source)));
+                this.ReactDOM.render(
+                    <this.ReactComponentContext.Provider value={context}>
+                        {evaluated}
+                    </this.ReactComponentContext.Provider>,
                     el
                 );
             } catch (e) {
-                ReactDOM.render(<ErrorComponent componentName={source} error={e} />, el);
+                this.ReactDOM.render(<this.ErrorComponent componentName={source} error={e} />, el);
             }
         };
-        tryRender();
-        const evRef = this.app.workspace.on('react-components:component-updated', () => {
+        await tryRender();
+        const evRef = this.app.workspace.on('react-components:component-updated', async () => {
             if (el && document.contains(el)) {
-                tryRender();
+                await tryRender();
             } else {
                 this.app.workspace.offref(evRef);
             }
@@ -222,8 +318,17 @@ export default class ReactBlocksPlugin extends Plugin {
     }
 
     async onload() {
+        try {
+            this.React = (await eval(`import('https://cdn.skypack.dev/react')`)).default;
+            this.ReactDOM = (await eval(`import('https://cdn.skypack.dev/react-dom')`)).default;
+        } catch (e) {
+            console.log('Failed to load online react package. Skypack react imports may not work.');
+            this.React = OfflineReact;
+            this.ReactDOM = OfflineReactDOM;
+        }
         await this.loadSettings();
         await this.loadComponents();
+        this.ReactComponentContext = this.React.createContext<ReactComponentContextData>(null);
         this.codeBlocks = new Map();
         const registerIfCodeBlockFile = file => {
             if (this.settings.template_folder != '' && file.parent.path.startsWith(this.settings.template_folder)) {
@@ -314,7 +419,7 @@ class ReactBlocksSettingTab extends PluginSettingTab {
 
         containerEl.empty();
 
-        containerEl.createEl('h2', { text: 'Obsidian React Components Settings' });
+        containerEl.createEl('h2', { text: 'React Components Settings' });
 
         new Setting(containerEl)
             .setName('Components folder location')
