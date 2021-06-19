@@ -80,6 +80,12 @@ You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-
 
 ## Changelog
 
+### 0.0.6 (2021-06-19) *Add support for skypack imports, bugfixes*
+
+* Added support for url based imports, such as `import styled from 'https://cdn.skypack.com/styled-components/'`
+  * *Example:* ![](https://user-images.githubusercontent.com/9102856/121813903-8123ad80-cc6e-11eb-8c65-b8c77faf51a6.gif)
+* Improved stability of component loading
+
 ### 0.0.5 (2021-05-22) *Enable dynamic updates of Markdown Rendering component, minor changes*
 
 * Updating the `src` prop of the `Markdown` component previously did not cause the component to rerender. This is now fixed.
