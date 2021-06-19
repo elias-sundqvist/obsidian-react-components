@@ -33,18 +33,18 @@ type ReactComponentContextData = {
     markdownPostProcessorContext: MarkdownPostProcessorContext;
 };
 
-const DEFAULT_SETTINGS: ReactBlocksSettings = {
+const DEFAULT_SETTINGS: ReactComponentsSettings = {
     template_folder: '',
     auto_refresh: true
 };
 
-interface ReactBlocksSettings {
+interface ReactComponentsSettings {
     template_folder: string;
     auto_refresh: boolean;
 }
 
-export default class ReactBlocksPlugin extends Plugin {
-    settings: ReactBlocksSettings;
+export default class ReactComponentsPlugin extends Plugin {
+    settings: ReactComponentsSettings;
     codeBlocks: Map<string, () => string>;
     components: Record<string, (any) => JSX.Element> = {};
     webComponents: Record<string, string>;
@@ -90,9 +90,7 @@ export default class ReactBlocksPlugin extends Plugin {
 
         useEffect(() => {
             setComponent(this.webComponents[tagName]);
-            console.log('Här vet vi att den hamnar');
             this.app.workspace.on('react-components:component-updated', () => {
-                console.log('den måste ju hamna här!');
                 setComponent(this.webComponents[tagName]);
                 setRefresh(Math.random());
             });
@@ -163,10 +161,9 @@ export default class ReactBlocksPlugin extends Plugin {
     // evaluated code inherits the scope of the current function
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     async evalAdapter(code: string, scope = this.getScope()) {
-        const encodedCode = `data:text/javascript;base64,${btoa(code)}`;
-        //console.log({encodedCode})
-        //console.log({toEval: `import(\`${encodedCode}\`)`})
-        const evaluated = (await eval(`import(\`${encodedCode}\`)`)).default(scope, this.transpileCode.bind(this));
+        const encodedCode = `data:text/javascript;charset=utf-8,${encodeURIComponent(code)}`;
+
+        const evaluated = (await this.importFromUrl(encodedCode)).default(scope, this.transpileCode.bind(this));
         if (typeof evaluated == 'function') {
             return (...args) => {
                 try {
@@ -181,10 +178,12 @@ export default class ReactBlocksPlugin extends Plugin {
     }
 
     registerWebComponent(componentTag: string) {
-        customElements.define(
-            componentTag,
-            reactToWebComponent(this.webComponentBase(componentTag), this.React, this.ReactDOM)
-        );
+        try {
+            customElements.define(
+                componentTag,
+                reactToWebComponent(this.webComponentBase(componentTag), this.React, this.ReactDOM)
+            );
+        } catch (e) {}
     }
 
     wrapCode(content: string) {
@@ -211,7 +210,7 @@ export default class ReactBlocksPlugin extends Plugin {
         )})))}`;
     }
 
-    async registerComponent(file: TFile) {
+    async registerComponent(file: TFile, suppressComponentRefresh = false) {
         if (file.extension != 'md') {
             new Notice(`"${file.basename}.${file.extension}" is not a markdown file`);
             return;
@@ -224,13 +223,11 @@ export default class ReactBlocksPlugin extends Plugin {
 
         const content = await this.app.vault.read(file);
         const webComponentRegex = /^\s*\/\/\s*web-component:\s*([a-z][a-z0-9-]*)/g;
-        //console.log({content, webComponentRegex})
         const matches = webComponentRegex.exec(content);
         if (matches?.length > 1) {
             const componentTag = matches[1];
             const wasRegistered = !!this.webComponents[componentTag];
             this.webComponents[componentTag] = file.basename;
-            console.log(`regestering component ${componentTag}`);
             if (!wasRegistered) {
                 this.registerWebComponent(componentTag);
             }
@@ -241,7 +238,7 @@ export default class ReactBlocksPlugin extends Plugin {
         if (!(this.codeBlocks.has(file.basename) && this.codeBlocks.get(file.basename)() == codeString)) {
             this.codeBlocks.set(file.basename, code);
             await this.refreshComponentScope();
-            if (this.settings.auto_refresh) {
+            if (this.settings.auto_refresh && !suppressComponentRefresh) {
                 this.app.workspace.trigger('react-components:component-updated');
             }
         }
@@ -264,21 +261,29 @@ export default class ReactBlocksPlugin extends Plugin {
         }
     }
 
+    async awaitFilesLoaded() {
+        let len: number;
+        do {
+            len = this.app.vault.getAllLoadedFiles().length;
+            await new Promise(r => setTimeout(r, 500));
+        } while (len != this.app.vault.getAllLoadedFiles().length);
+    }
+
     async loadComponents() {
+        this.codeBlocks = new Map();
         this.components = {};
         this.webComponents = {};
         if (this.settings.template_folder.trim() == '') {
             new Notice('Cannot Load react components unless directory is set');
         } else {
             try {
+                await this.awaitFilesLoaded();
                 const files = this.getTFilesFromFolder(this.settings.template_folder);
                 for (const file of files) {
-                    await this.registerComponent(file);
+                    await this.registerComponent(file, true);
                 }
                 await this.refreshComponentScope();
-                if (this.settings.auto_refresh) {
-                    this.app.workspace.trigger('react-components:component-updated');
-                }
+                this.app.workspace.trigger('react-components:component-updated');
             } catch (e) {
                 new Notice('React Component Folder Not Found!');
             }
@@ -317,10 +322,15 @@ export default class ReactBlocksPlugin extends Plugin {
         });
     }
 
+    importFromUrl(url: string): Promise<{ default }> {
+        const importf = eval(`x=>import(x)`);
+        return importf(url);
+    }
+
     async onload() {
         try {
-            this.React = (await eval(`import('https://cdn.skypack.dev/react')`)).default;
-            this.ReactDOM = (await eval(`import('https://cdn.skypack.dev/react-dom')`)).default;
+            this.React = (await this.importFromUrl('https://cdn.skypack.dev/react')).default;
+            this.ReactDOM = (await this.importFromUrl('https://cdn.skypack.dev/react-dom')).default;
         } catch (e) {
             console.log('Failed to load online react package. Skypack react imports may not work.');
             this.React = OfflineReact;
@@ -329,9 +339,12 @@ export default class ReactBlocksPlugin extends Plugin {
         await this.loadSettings();
         await this.loadComponents();
         this.ReactComponentContext = this.React.createContext<ReactComponentContextData>(null);
-        this.codeBlocks = new Map();
         const registerIfCodeBlockFile = file => {
-            if (this.settings.template_folder != '' && file.parent.path.startsWith(this.settings.template_folder)) {
+            if (
+                file instanceof TFile &&
+                this.settings.template_folder != '' &&
+                file.parent.path.startsWith(this.settings.template_folder)
+            ) {
                 this.registerComponent(file);
             }
         };
@@ -343,6 +356,9 @@ export default class ReactBlocksPlugin extends Plugin {
                 this.app.workspace.trigger('react-components:component-updated');
             }
         });
+        this.registerEvent(this.app.vault.on('create', registerIfCodeBlockFile));
+        this.registerEvent(this.app.vault.on('modify', registerIfCodeBlockFile));
+        this.registerEvent(this.app.vault.on('rename', registerIfCodeBlockFile));
         this.registerEvent(this.app.metadataCache.on('changed', registerIfCodeBlockFile));
         this.registerEvent(this.app.metadataCache.on('resolve', registerIfCodeBlockFile));
         this.registerEvent(this.app.workspace.on('layout-ready', () => this.loadComponents()));
@@ -365,7 +381,7 @@ export default class ReactBlocksPlugin extends Plugin {
                 this.attachComponent(source, container, ctx);
             });
         });
-        this.addSettingTab(new ReactBlocksSettingTab(this));
+        this.addSettingTab(new ReactComponentsSettingTab(this));
     }
 
     onunload() {
@@ -406,10 +422,10 @@ export default class ReactBlocksPlugin extends Plugin {
     }
 }
 
-class ReactBlocksSettingTab extends PluginSettingTab {
-    plugin: ReactBlocksPlugin;
+class ReactComponentsSettingTab extends PluginSettingTab {
+    plugin: ReactComponentsPlugin;
 
-    constructor(plugin: ReactBlocksPlugin) {
+    constructor(plugin: ReactComponentsPlugin) {
         super(plugin.app, plugin);
         this.plugin = plugin;
     }
