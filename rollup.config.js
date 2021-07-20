@@ -1,5 +1,6 @@
 import typescript from '@rollup/plugin-typescript';
 import {nodeResolve} from '@rollup/plugin-node-resolve';
+import nodePolyfills from 'rollup-plugin-polyfill-node';
 import commonjs from '@rollup/plugin-commonjs';
 import copy from 'rollup-plugin-copy'
 import css from "rollup-plugin-import-css";
@@ -36,6 +37,7 @@ export default {
     typescript(),
     nodeResolve({browser: true}),
     commonjs(),
+    nodePolyfills(),
     ...(vault_plugin_dir != '.' ? [copy({
       targets: [
         { src: 'manifest.json', dest: vault_plugin_dir }

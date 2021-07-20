@@ -1,5 +1,5 @@
-import { default as OfflineReact } from 'react';
-import { default as OfflineReactDOM } from 'react-dom';
+import type OfflineReact from 'react';
+import type OfflineReactDOM from 'react-dom';
 
 const reactComponentSymbol = Symbol.for('r2wc.reactComponent');
 const renderSymbol = Symbol.for('r2wc.reactRender');

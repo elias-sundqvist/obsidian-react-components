@@ -80,6 +80,12 @@ You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-
 
 ## Changelog
 
+### 0.0.7 (2021-07-20) *Add support for mobile, Typescript*
+
+* Issue with loading plugin on Obsidan Mobile has been resolved.
+* Typescript syntax is now supported
+* Unused dependencies removed
+
 ### 0.0.6 (2021-06-19) *Add support for skypack imports, bugfixes*
 
 * Added support for url based imports, such as `import styled from 'https://cdn.skypack.com/styled-components/'`

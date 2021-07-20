@@ -12,10 +12,9 @@ import {
     Vault
 } from 'obsidian';
 import * as obsidian from 'obsidian';
-import { default as OfflineReact } from 'react';
-import { default as OfflineReactDOM } from 'react-dom';
+import OfflineReact from 'react';
+import OfflineReactDOM from 'react-dom';
 import Babel from '@babel/standalone';
-import ReactPreset from '@babel/preset-react';
 import isVarName from 'is-var-name';
 import reactToWebComponent from './react-webcomponent';
 
@@ -48,8 +47,8 @@ export default class ReactComponentsPlugin extends Plugin {
     codeBlocks: Map<string, () => string>;
     components: Record<string, (any) => JSX.Element> = {};
     webComponents: Record<string, string>;
-    React: typeof OfflineReact = OfflineReact;
-    ReactDOM: typeof OfflineReactDOM = OfflineReactDOM;
+    React: typeof OfflineReact;
+    ReactDOM: typeof OfflineReactDOM;
 
     ReactComponentContext: OfflineReact.Context<ReactComponentContextData>;
     Markdown = ({ src }: { src: string }) => {
@@ -155,7 +154,19 @@ export default class ReactComponentsPlugin extends Plugin {
     }
 
     transpileCode(content: string) {
-        return Babel.transform(content, { presets: [ReactPreset] }).code;
+        return Babel.transform(content, {
+            presets: [
+                Babel.availablePresets['react'],
+                [
+                    Babel.availablePresets['typescript'],
+                    {
+                        onlyRemoveTypeImports: true,
+                        allExtensions: true,
+                        isTSX: true
+                    }
+                ]
+            ]
+        }).code;
     }
 
     // evaluated code inherits the scope of the current function
@@ -335,6 +346,7 @@ export default class ReactComponentsPlugin extends Plugin {
             console.log('Failed to load online react package. Skypack react imports may not work.');
             this.React = OfflineReact;
             this.ReactDOM = OfflineReactDOM;
+            console.log('Error:', e);
         }
         await this.loadSettings();
         await this.loadComponents();
