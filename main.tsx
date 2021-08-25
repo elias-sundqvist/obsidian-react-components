@@ -394,6 +394,15 @@ export default class ReactComponentsPlugin extends Plugin {
             });
         });
         this.addSettingTab(new ReactComponentsSettingTab(this));
+        this.refreshPanes();
+    }
+
+    refreshPanes() {
+        this.app.workspace.getLeavesOfType('markdown').forEach(leaf => {
+            if (leaf.getViewState().state.mode.includes('preview'))
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (leaf.view as any).previewMode.rerender(true);
+        });
     }
 
     onunload() {

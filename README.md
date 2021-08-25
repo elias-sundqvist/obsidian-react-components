@@ -80,6 +80,10 @@ You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-
 
 ## Changelog
 
+### 0.0.8 (2021-08-25) *Minor rendering fix*
+
+* Issue with loading components on obisian start has been resolved. (Issue #19)
+
 ### 0.0.7 (2021-07-20) *Add support for mobile, Typescript*
 
 * Issue with loading plugin on Obsidan Mobile has been resolved.
