@@ -80,6 +80,14 @@ You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-
 
 ## Changelog
 
+### 0.0.9 (2021-08-26) *Frontmatter Support and Header Components*
+
+* It is now possible to add frontmatter data to the component notes. (it will be ignored by the javascript parser).
+* Notes with the frontmatter attribute `use-as-note-header` will be used as a header for all notes in the vault.  
+  * This allows you to do things like this: ![header component demo](https://user-images.githubusercontent.com/9102856/130989310-8e99ceb3-701b-440e-8bb6-245cddfaa95e.gif)
+  * *note:* only use this frontmatter attribute on at most one vault component. 
+
+
 ### 0.0.8 (2021-08-25) *Minor rendering fix*
 
 * Issue with loading components on obisian start has been resolved. (Issue #19)

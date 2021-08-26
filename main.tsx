@@ -49,6 +49,10 @@ export default class ReactComponentsPlugin extends Plugin {
     webComponents: Record<string, string>;
     React: typeof OfflineReact;
     ReactDOM: typeof OfflineReactDOM;
+    noteHeaderComponent: (any) => JSX.Element = () => {
+        const React = this.React;
+        return <></>;
+    };
 
     ReactComponentContext: OfflineReact.Context<ReactComponentContextData>;
     Markdown = ({ src }: { src: string }) => {
@@ -119,6 +123,7 @@ export default class ReactComponentsPlugin extends Plugin {
         const scope = {
             Markdown: this.Markdown,
             ReactComponentContext: this.ReactComponentContext,
+            pluginInternalNoteHeaderComponent: this.noteHeaderComponent,
             React,
             ReactDOM,
             useState,
@@ -180,7 +185,7 @@ export default class ReactComponentsPlugin extends Plugin {
                 try {
                     return evaluated(...args);
                 } catch (e) {
-                    return e.toString();
+                    return this.ErrorComponent({ componentName: 'evaluated code', error: e });
                 }
             };
         } else {
@@ -221,6 +226,10 @@ export default class ReactComponentsPlugin extends Plugin {
         )})))}`;
     }
 
+    removeFrontMatter(stringWithFrontMatter: string): string {
+        return stringWithFrontMatter.replace(/^---$(.|\n)+?^---$\n/gm, '');
+    }
+
     async registerComponent(file: TFile, suppressComponentRefresh = false) {
         if (file.extension != 'md') {
             new Notice(`"${file.basename}.${file.extension}" is not a markdown file`);
@@ -232,11 +241,12 @@ export default class ReactComponentsPlugin extends Plugin {
             return;
         }
 
-        const content = await this.app.vault.read(file);
-        const webComponentRegex = /^\s*\/\/\s*web-component:\s*([a-z][a-z0-9-]*)/g;
-        const matches = webComponentRegex.exec(content);
-        if (matches?.length > 1) {
-            const componentTag = matches[1];
+        let content = await this.app.vault.read(file);
+        content = this.removeFrontMatter(content);
+        const frontmatter = this.app.metadataCache.getFileCache(file).frontmatter;
+
+        if (frontmatter?.['web-component']) {
+            const componentTag = frontmatter['web-component'].trim();
             const wasRegistered = !!this.webComponents[componentTag];
             this.webComponents[componentTag] = file.basename;
             if (!wasRegistered) {
@@ -259,6 +269,12 @@ export default class ReactComponentsPlugin extends Plugin {
             );
         } catch (e) {
             this.components[file.basename] = () => this.ErrorComponent({ componentName: file.basename, error: e });
+        }
+        if (frontmatter?.['use-as-note-header']) {
+            if (this.noteHeaderComponent != this.components[file.basename]) {
+                this.noteHeaderComponent = this.components[file.basename];
+                this.app.workspace.trigger('react-components:component-updated');
+            }
         }
     }
 
@@ -349,8 +365,8 @@ export default class ReactComponentsPlugin extends Plugin {
             console.log('Error:', e);
         }
         await this.loadSettings();
-        await this.loadComponents();
         this.ReactComponentContext = this.React.createContext<ReactComponentContextData>(null);
+        await this.loadComponents();
         const registerIfCodeBlockFile = file => {
             if (
                 file instanceof TFile &&
@@ -374,7 +390,40 @@ export default class ReactComponentsPlugin extends Plugin {
         this.registerEvent(this.app.metadataCache.on('changed', registerIfCodeBlockFile));
         this.registerEvent(this.app.metadataCache.on('resolve', registerIfCodeBlockFile));
         this.registerEvent(this.app.workspace.on('layout-ready', () => this.loadComponents()));
+        this.addSettingTab(new ReactComponentsSettingTab(this));
+        this.registerCodeBlockProcessor();
+        this.registerInlineCodeProcessor();
+        this.registerHeaderProcessor();
+        this.refreshPanes();
+    }
+
+    registerHeaderProcessor() {
+        this.registerMarkdownPostProcessor(async (_, ctx) => {
+            if (!ctx.containerEl?.hasClass('markdown-preview-section')) {
+                return;
+            }
+            const container = document.createElement('div');
+            container.addClass('reactHeaderComponent');
+            const viewContainer = ctx.containerEl.parentElement;
+            const existingHeaders = [...viewContainer?.getElementsByClassName('reactHeaderComponent')];
+            existingHeaders.forEach(banner => {
+                this.ReactDOM.unmountComponentAtNode(banner);
+                banner.remove();
+            });
+            viewContainer?.insertBefore(container, ctx.containerEl);
+            this.attachComponent(
+                'const HeaderComponent = pluginInternalNoteHeaderComponent; <HeaderComponent/>',
+                container,
+                ctx
+            );
+        });
+    }
+
+    registerCodeBlockProcessor() {
         this.registerMarkdownCodeBlockProcessor('jsx-', this.attachComponent.bind(this));
+    }
+
+    registerInlineCodeProcessor() {
         this.registerMarkdownPostProcessor(async (el, ctx) => {
             const codeblocks = el.querySelectorAll('code');
             const toReplace = [];
@@ -393,8 +442,6 @@ export default class ReactComponentsPlugin extends Plugin {
                 this.attachComponent(source, container, ctx);
             });
         });
-        this.addSettingTab(new ReactComponentsSettingTab(this));
-        this.refreshPanes();
     }
 
     refreshPanes() {
