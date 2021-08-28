@@ -6,46 +6,81 @@ This is a plugin for Obsidian (https://obsidian.md).
 
 It allows you to write and use React components with Jsx inside your Obsidian notes. 
 
+It is highly recommended that you also install the [Editor Syntax Highlight Plugin](https://github.com/deathau/cm-editor-syntax-highlight-obsidian) when using this plugin.  
+
 ## Demonstration
-![](images/demo.gif)
+![React Components Demo](https://user-images.githubusercontent.com/9102856/131183517-e136e585-044c-482a-b6d1-fddc3134bac8.gif)
 
 ## Getting Started 
 
-In order to use the plugin, you must first specify a folder for the Jsx functions / react components. 
+There are two methods for creating react components.
+### Using Code Blocks
 
-![](images/settings.png)
+Put a note anywhere in your vault and give it the property `defines-react-components`. You can also optionally set a specific namespace (series of words separated by dots), using the `react-components-namespace` property. 
+
+This can either be done in the frontmatter, like so:
+
+```yaml
+---
+defines-react-components: true
+react-components-namespace: projects.test
+---
+```
+
+or (if dataview is installed) using dataview inline properties
+
+```m
+defines-react-components:: true
+react-components-namespace:: projects.test
+```
+
+Then, in your note, to define a component, write a code block like this
+````md
+```jsx:component:MyComponent
+return <div>Hello {props.name}!</div>
+```
+````
+
+This will create a component called `MyComponent`, located in the `projects.test` namespace (or in the global namespace if you left the property unspecified).
+
+You can then use the component like this:
+
+````md
+```jsx:
+<MyComponent name={"World"}/>
+```
+````
+Or, using inline syntax.
+
+````md
+`jsx:<MyComponent name={"World"}/>`
+````
+
+If you are in a note which uses a separate namespace, you can access the component like so:
+
+````md
+`jsx:<projects.test.MyComponent name={"World"}/>`
+````
+
+
+
+
+### Using Component Notes
+
+An alternative way of creating components is *component notes*. This approach treats an entire markdown file as the definition of a single react component. 
+A benefit of this approach is that you can open the note in, for example, visual studio code, to get full syntax highlighting and some code autocompletion.
+
+In order to use component notes, you must first specify a folder for the Jsx functions / react components. 
+
+![image](https://user-images.githubusercontent.com/9102856/131140527-a7acbcd0-6524-4daa-bcd5-17fa4be176cd.png)
 
 Every note in this directory will be interpreted as the content of a Jsx function (implicitly of the form `props=>{your code here}`)
 
 Every file becomes a function/react component with the same name as the note. 
 
-## Using Components
-
-Jsx code can be called both using full code blocks (using the `jsx-` environment) or though inline code (with the prefix `jsx-`).
-
-
-
-As can be seen above, you can either include components using the block level (code environment) approach:  
-
-````
-```jsx-
-<Testcomponent source="Click Me!"/>
-```
-````
-
-... or using the inline code (with prefix) approach
-
-```md
-A dice roller:  `jsx-<DiceRoller sides={10}/>`
-```
-
-The definitions for the example components used above can be found in the [Example Components](#Example-components) section further down. 
-
 ## Writing Components
 
 The syntax for writing components is regular [Jsx Syntax](https://reactjs.org/docs/introducing-jsx.html)
-
-Each file is interpreted as a single function with the same name as the note file.  So if you, in obsidian, write the note `Clock` inside your components folder, then all other Jsx code blocks will get access to a corresponding new function/component `Clock`. 
 
 The content of your component file is implicitly wrapped in `props=>{...}`. This means that you *don't* write the function signature yourself. You *do*, however, need to include the `return` keyword in your code. 
 
@@ -58,16 +93,48 @@ Other things to keep in mind:
     * Certain words may not be used as variable names, because they have other meanings within JavaScript. Check out this [complete list of the reserved words](https://www.dummies.com/cheatsheet/javascriptforkids).
 * In order to be used as a React component, the first letter of the function must be capitalized. 
 
+## Using Components
+
+Components can be used like this:
+
+````md
+```jsx:
+<MyComponent name={"World"}/>
+```
+````
+Or, using inline syntax.
+
+````md
+`jsx:<MyComponent name={"World"}/>`
+````
+
+If you are in a note which uses a separate namespace, you can access the component like so:
+
+````md
+`jsx:<projects.test.MyComponent name={"World"}/>`
+````
+
+When using the codeblock syntax, (` ```jsx: `), the code can be multiple lines. The last statement is implicitly returned and rendered. 
+
+
 ## Component Scope
 
-The react components have access to everything inside the global scope. (Use with caution, API changes could break your components).
+The react components have access to everything inside the global namespace.
 
 Besides this, the components have access to `React`, `ReactDOM`, `useState`, and `useEffect`. 
 This allows you to easily write functional components. 
 
-Besides that, `ctx`, which is the *file context* is also available. You can, for instance, get frontmatter data from here. Note, however, that the components don`t automatically refresh after the frontmatter is updated. 
+Besides that, you can also access the *file context* through the hook call `useContext(ReactComponentContext);`. This can then be used to, for example, access the frontmatter as follows:
 
-In the future, I would like to add an object that exposes useful variables and is more resilient to API changes. (similar to `tp` in the [Templater Plugin](https://github.com/SilentVoid13/Templater)).
+````md
+```jsx:component:ComponentWithFrontmatter
+const ctx = useContext(ReactComponentContext);
+var frontmatter = ctx.markdownPostProcessorContext.frontmatter;
+
+return <h1>{frontmatter.title}</h1>
+```
+````
+
 
 ## Contributing
 
@@ -79,6 +146,13 @@ You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-
 
 
 ## Changelog
+
+### 0.1.0 (2021-08-27) *Added Alternative code block Syntax and Namespaces*
+
+* The plugin now has support for writing `jsx:` instead of `jsx-`. 
+  * This new syntax is compatible with the [Editor Syntax Highlight Plugin](https://github.com/deathau/cm-editor-syntax-highlight-obsidian): ![syntax highlighting demo](https://user-images.githubusercontent.com/9102856/131139119-0c4e4bf5-914b-4e24-a917-cdac730b270b.gif)
+* You can now also restrict how / from where you access components through the `react-components-namespace` property. See Readme for details.
+* The Readme has been updated. 
 
 ### 0.0.9 (2021-08-26) *Frontmatter Support and Header Components*
 

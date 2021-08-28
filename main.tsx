@@ -18,16 +18,6 @@ import Babel from '@babel/standalone';
 import isVarName from 'is-var-name';
 import reactToWebComponent from './react-webcomponent';
 
-declare module 'obsidian' {
-    interface Workspace {
-        on(name: 'react-components:component-updated', callback: () => void): EventRef;
-    }
-
-    interface MarkdownPostProcessorContext {
-        containerEl?: HTMLElement;
-    }
-}
-
 type ReactComponentContextData = {
     markdownPostProcessorContext: MarkdownPostProcessorContext;
 };
@@ -42,13 +32,23 @@ interface ReactComponentsSettings {
     auto_refresh: boolean;
 }
 
+const CodeBlockSymbol = Symbol();
+const NamespaceNameSymbol = Symbol();
+
+type NamespaceObject = {
+    [k: string]: NamespaceObject | ((any) => JSX.Element);
+    [CodeBlockSymbol]?: Map<string, () => string> | null;
+    [NamespaceNameSymbol]?: string;
+};
+
 export default class ReactComponentsPlugin extends Plugin {
     settings: ReactComponentsSettings;
-    codeBlocks: Map<string, () => string>;
-    components: Record<string, (any) => JSX.Element> = {};
+    namespaceRoot: NamespaceObject;
     webComponents: Record<string, string>;
     React: typeof OfflineReact;
     ReactDOM: typeof OfflineReactDOM;
+    renderedHeaderMap: WeakMap<Element, MarkdownPostProcessorContext> = new WeakMap();
+
     noteHeaderComponent: (any) => JSX.Element = () => {
         const React = this.React;
         return <></>;
@@ -77,7 +77,14 @@ export default class ReactComponentsPlugin extends Plugin {
         return (
             <span style={{ color: 'red' }}>
                 {`Error in component "${componentName}": ${error.toString()}`}
-                <button onClick={() => console.error(error)}>Show In Console</button>
+                <button
+                    onClick={() =>
+                        setTimeout(() => {
+                            throw error;
+                        }, 1)
+                    }>
+                    Show In Console
+                </button>
             </span>
         );
     };
@@ -88,8 +95,9 @@ export default class ReactComponentsPlugin extends Plugin {
         const { useState, useEffect } = React;
         const setRefresh = useState<number>()[1];
         const [component, setComponent] = useState<string>();
-
-        const Component = component ? this.components[component] : () => <h1>Nothing Here Yet</h1>;
+        const namespaceObject = this.getNamespaceObject('Global');
+        const possibleComponent = namespaceObject[component];
+        const Component = typeof possibleComponent == 'function' ? possibleComponent : () => <h1>Nothing Here Yet</h1>;
 
         useEffect(() => {
             setComponent(this.webComponents[tagName]);
@@ -107,7 +115,7 @@ export default class ReactComponentsPlugin extends Plugin {
         );
     };
 
-    getScope() {
+    getScope(namespace: string) {
         const React = this.React;
         const ReactDOM = this.ReactDOM;
         const { useState, useEffect, useContext, useCallback, useMemo, useReducer, useRef } = React;
@@ -136,26 +144,77 @@ export default class ReactComponentsPlugin extends Plugin {
             useIsPreview,
             obsidian
         };
+
         // Prevent stale component references
-        const components = this.components;
-        for (const componentName of Object.keys(components)) {
-            Object.defineProperty(scope, componentName, {
-                get: function () {
-                    return components[componentName];
-                },
-                enumerable: true
-            });
-        }
+        const addDynamicReferences = (namespaceObject: NamespaceObject) => {
+            for (const componentName of Object.keys(namespaceObject)) {
+                if (scope[componentName] || !isVarName(componentName)) continue;
+                Object.defineProperty(scope, componentName, {
+                    get: function () {
+                        return namespaceObject[componentName];
+                    },
+                    enumerable: true
+                });
+            }
+        };
+
+        addDynamicReferences(this.getNamespaceObject(namespace));
+        addDynamicReferences(this.getNamespaceObject('Global'));
+        addDynamicReferences(this.namespaceRoot);
+
         return scope;
     }
 
-    getScopeExpression(scope = this.getScope()) {
+    getNamespaceObject(namespace: string): NamespaceObject {
+        let namespaceObject = this.namespaceRoot;
+        namespace
+            .trim()
+            .split('.')
+            .forEach(c => {
+                let next = namespaceObject?.[c.trim()];
+                if (typeof next == 'function') {
+                    namespaceObject = null;
+                } else if (next) {
+                    namespaceObject = next;
+                } else {
+                    next = {} as NamespaceObject;
+                    namespaceObject[c.trim()] = next;
+                    namespaceObject = next;
+                }
+            });
+        if (!namespaceObject[CodeBlockSymbol]) {
+            namespaceObject[CodeBlockSymbol] = new Map();
+            namespaceObject[NamespaceNameSymbol] = namespace;
+        }
+        return namespaceObject;
+    }
+
+    getScopeExpression(namespace: string) {
+        const scope = this.getScope(namespace);
         return (
             Object.keys(scope)
                 .sort()
                 .map(k => `let ${k}=scope.${k};`)
                 .join('\n') + '\n'
         );
+    }
+
+    getPropertyValue(propertyName: string, file: TFile) {
+        const dataViewPropertyValue = (this.app as any)?.plugins?.plugins?.dataview?.api // eslint-disable-line
+            ?.page(file.path)?.[propertyName];
+        if (dataViewPropertyValue) {
+            if (dataViewPropertyValue.path) {
+                return this.app.metadataCache.getFirstLinkpathDest(dataViewPropertyValue.path, file.path).path;
+            }
+            const externalLinkMatch = /^\[.*\]\((.*)\)$/gm.exec(dataViewPropertyValue)?.[1];
+            if (externalLinkMatch) {
+                return externalLinkMatch;
+            }
+            return dataViewPropertyValue;
+        } else {
+            const cache = this.app.metadataCache.getFileCache(file);
+            return cache?.frontmatter?.[propertyName];
+        }
     }
 
     transpileCode(content: string) {
@@ -176,7 +235,8 @@ export default class ReactComponentsPlugin extends Plugin {
 
     // evaluated code inherits the scope of the current function
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    async evalAdapter(code: string, scope = this.getScope()) {
+    async evalAdapter(code: string, namespace: string) {
+        const scope = this.getScope(namespace);
         const encodedCode = `data:text/javascript;charset=utf-8,${encodeURIComponent(code)}`;
 
         const evaluated = (await this.importFromUrl(encodedCode)).default(scope, this.transpileCode.bind(this));
@@ -202,40 +262,73 @@ export default class ReactComponentsPlugin extends Plugin {
         } catch (e) {}
     }
 
-    wrapCode(content: string) {
+    wrapCode(content: string, namespace: string) {
         const importsRegexp = /^\s*import\s(.|\s)*?\sfrom\s.*?$/gm;
         const imports = [];
         content = content.replaceAll(importsRegexp, match => {
             imports.push(match.trim());
             return '';
         });
-        return `${imports.join('\n')}\nexport default scope=>props=>{\n${this.getScopeExpression()}\n${content}}`;
+        return `${imports.join('\n')}\nexport default scope=>props=>{\n${this.getScopeExpression(
+            namespace
+        )}\n${content}}`;
     }
 
-    wrapInNoteCode(content: string) {
+    wrapInNoteCode(content: string, namespace: string) {
         const importsRegexp = /^\s*import\s(.|\s)*?\sfrom\s.*?$/gm;
         const imports = [];
         content = content.replaceAll(importsRegexp, match => {
             imports.push(match.trim());
             return '';
         });
-        return `${imports.join(
-            '\n'
-        )}\nexport default (scope, transpile)=>{\n${this.getScopeExpression()}\n return eval(transpile(JSON.parse(${JSON.stringify(
-            JSON.stringify(content)
-        )})))}`;
+        return `${imports.join('\n')}\nexport default (scope, transpile)=>{\n${this.getScopeExpression(
+            namespace
+        )}\n return eval(transpile(JSON.parse(${JSON.stringify(JSON.stringify(content))})))}`;
     }
 
     removeFrontMatter(stringWithFrontMatter: string): string {
         return stringWithFrontMatter.replace(/^---$(.|\n)+?^---$\n/gm, '');
     }
 
-    async registerComponent(file: TFile, suppressComponentRefresh = false) {
+    async registerComponents(file: TFile, suppressComponentRefresh = false) {
         if (file.extension != 'md') {
             new Notice(`"${file.basename}.${file.extension}" is not a markdown file`);
             return;
         }
 
+        if (this.getPropertyValue('defines-react-components', file)) {
+            await this.registerCodeBlockComponents(file, suppressComponentRefresh);
+        } else if (file.path.startsWith(normalizePath(this.settings.template_folder))) {
+            await this.registerFullFileComponent(file, suppressComponentRefresh);
+        }
+    }
+
+    getMatches(regex: RegExp, str: string) {
+        let m: RegExpExecArray;
+        const res: RegExpExecArray[] = [];
+        while ((m = regex.exec(str)) !== null) {
+            if (m.index === regex.lastIndex) {
+                regex.lastIndex++;
+            }
+            res.push(m);
+        }
+        return res;
+    }
+
+    async registerCodeBlockComponents(file: TFile, suppressComponentRefresh = false) {
+        const content = await this.app.vault.read(file);
+        const nameSpace = this.getPropertyValue('react-components-namespace', file) || 'Global';
+
+        const matches = this.getMatches(/^\s*?```jsx:component:(.*)\n((.|\n)*?)\n^\s*?```$/gm, content);
+        for (const match of matches) {
+            const [componentName] = match[1].split(':').map(x => x.trim());
+            if (!isVarName(componentName)) continue;
+            const componentCode = match[2];
+            await this.registerComponent(componentCode, componentName, nameSpace, suppressComponentRefresh);
+        }
+    }
+
+    async registerFullFileComponent(file: TFile, suppressComponentRefresh = false) {
         if (!isVarName(file.basename)) {
             new Notice(`"${file.basename}" is not a valid function name`);
             return;
@@ -243,49 +336,76 @@ export default class ReactComponentsPlugin extends Plugin {
 
         let content = await this.app.vault.read(file);
         content = this.removeFrontMatter(content);
-        const frontmatter = this.app.metadataCache.getFileCache(file).frontmatter;
 
-        if (frontmatter?.['web-component']) {
-            const componentTag = frontmatter['web-component'].trim();
+        const webComponentPropertyValue = this.getPropertyValue('web-component', file);
+
+        if (webComponentPropertyValue) {
+            const componentTag = webComponentPropertyValue.trim();
             const wasRegistered = !!this.webComponents[componentTag];
             this.webComponents[componentTag] = file.basename;
             if (!wasRegistered) {
                 this.registerWebComponent(componentTag);
             }
         }
+        const namespace = 'Global';
 
-        const code = () => this.wrapCode(content);
+        await this.registerComponent(content, file.basename, namespace, suppressComponentRefresh);
+
+        const namespaceObject = this.getNamespaceObject(namespace);
+
+        const useAsNoteHeaderPropertyValue = this.getPropertyValue('use-as-note-header', file);
+        if (useAsNoteHeaderPropertyValue) {
+            const newNoteHeaderComponent = namespaceObject[file.basename];
+            if (this.noteHeaderComponent != newNoteHeaderComponent && typeof newNoteHeaderComponent == 'function') {
+                this.noteHeaderComponent = newNoteHeaderComponent;
+                this.app.workspace.trigger('react-components:component-updated');
+            }
+        }
+    }
+
+    async registerComponent(content: string, componentName: string, componentNamespace, suppressComponentRefresh) {
+        const code = () => this.wrapCode(content, componentNamespace);
         const codeString = code();
-        if (!(this.codeBlocks.has(file.basename) && this.codeBlocks.get(file.basename)() == codeString)) {
-            this.codeBlocks.set(file.basename, code);
+        const namespaceObject = this.getNamespaceObject(componentNamespace);
+        const codeBlocks = namespaceObject[CodeBlockSymbol];
+        if (!(codeBlocks.has(componentName) && codeBlocks.get(componentName)() == codeString)) {
+            codeBlocks.set(componentName, code);
             await this.refreshComponentScope();
             if (this.settings.auto_refresh && !suppressComponentRefresh) {
                 this.app.workspace.trigger('react-components:component-updated');
             }
         }
         try {
-            this.components[file.basename] = await this.evalAdapter(
-                this.transpileCode(this.codeBlocks.get(file.basename)())
+            namespaceObject[componentName] = await this.evalAdapter(
+                this.transpileCode(namespaceObject[CodeBlockSymbol].get(componentName)()),
+                componentNamespace
             );
         } catch (e) {
-            this.components[file.basename] = () => this.ErrorComponent({ componentName: file.basename, error: e });
-        }
-        if (frontmatter?.['use-as-note-header']) {
-            if (this.noteHeaderComponent != this.components[file.basename]) {
-                this.noteHeaderComponent = this.components[file.basename];
-                this.app.workspace.trigger('react-components:component-updated');
-            }
+            namespaceObject[componentName] = () => this.ErrorComponent({ componentName, error: e });
         }
     }
 
     async refreshComponentScope() {
-        for (const [name, codef] of this.codeBlocks) {
-            try {
-                this.components[name] = await this.evalAdapter(this.transpileCode(codef()));
-            } catch (e) {
-                this.components[name] = () => this.ErrorComponent({ componentName: name, error: e });
+        const refreshNamespaceObject = async (namespaceObject: NamespaceObject) => {
+            for (const name of Object.keys(namespaceObject)) {
+                if (typeof name !== 'string') continue;
+                const value = namespaceObject[name];
+                if (typeof value === 'function') {
+                    const codef = namespaceObject[CodeBlockSymbol].get(name);
+                    try {
+                        namespaceObject[name] = await this.evalAdapter(
+                            this.transpileCode(codef()),
+                            namespaceObject[NamespaceNameSymbol]
+                        );
+                    } catch (e) {
+                        namespaceObject[name] = () => this.ErrorComponent({ componentName: name, error: e });
+                    }
+                } else {
+                    refreshNamespaceObject(value);
+                }
             }
-        }
+        };
+        refreshNamespaceObject(this.namespaceRoot);
     }
 
     async awaitFilesLoaded() {
@@ -297,24 +417,16 @@ export default class ReactComponentsPlugin extends Plugin {
     }
 
     async loadComponents() {
-        this.codeBlocks = new Map();
-        this.components = {};
+        this.namespaceRoot = {};
         this.webComponents = {};
-        if (this.settings.template_folder.trim() == '') {
-            new Notice('Cannot Load react components unless directory is set');
-        } else {
-            try {
-                await this.awaitFilesLoaded();
-                const files = this.getTFilesFromFolder(this.settings.template_folder);
-                for (const file of files) {
-                    await this.registerComponent(file, true);
-                }
-                await this.refreshComponentScope();
-                this.app.workspace.trigger('react-components:component-updated');
-            } catch (e) {
-                new Notice('React Component Folder Not Found!');
+        try {
+            await this.awaitFilesLoaded();
+            for (const file of this.app.vault.getMarkdownFiles()) {
+                await this.registerComponents(file, true);
             }
-        }
+            await this.refreshComponentScope();
+            this.app.workspace.trigger('react-components:component-updated');
+        } catch (e) {}
     }
 
     generateReactComponentContext(ctx: MarkdownPostProcessorContext): ReactComponentContextData {
@@ -327,8 +439,16 @@ export default class ReactComponentsPlugin extends Plugin {
         const tryRender = async () => {
             const React = this.React;
             try {
+                const namespace =
+                    this.getPropertyValue(
+                        'react-components-namespace',
+                        this.app.vault.getAbstractFileByPath(ctx.sourcePath) as TFile
+                    ) ?? 'Global';
                 const context = this.generateReactComponentContext(ctx);
-                const evaluated = await this.evalAdapter(this.transpileCode(this.wrapInNoteCode(source)));
+                const evaluated = await this.evalAdapter(
+                    this.transpileCode(this.wrapInNoteCode(source, namespace)),
+                    namespace
+                );
                 this.ReactDOM.render(
                     <this.ReactComponentContext.Provider value={context}>
                         {evaluated}
@@ -339,10 +459,11 @@ export default class ReactComponentsPlugin extends Plugin {
                 this.ReactDOM.render(<this.ErrorComponent componentName={source} error={e} />, el);
             }
         };
-        await tryRender();
+        await tryRender.bind(this)();
         const evRef = this.app.workspace.on('react-components:component-updated', async () => {
+            console.log('Reacted to event:', 'react-components:component-updated');
             if (el && document.contains(el)) {
-                await tryRender();
+                await tryRender.bind(this)();
             } else {
                 this.app.workspace.offref(evRef);
             }
@@ -370,10 +491,11 @@ export default class ReactComponentsPlugin extends Plugin {
         const registerIfCodeBlockFile = file => {
             if (
                 file instanceof TFile &&
-                this.settings.template_folder != '' &&
-                file.parent.path.startsWith(this.settings.template_folder)
+                ((this.settings.template_folder != '' &&
+                    file.parent.path.startsWith(normalizePath(this.settings.template_folder))) ||
+                    this.getPropertyValue('defines-react-components', file))
             ) {
-                this.registerComponent(file);
+                this.registerComponents(file);
             }
         };
         this.addCommand({
@@ -384,15 +506,19 @@ export default class ReactComponentsPlugin extends Plugin {
                 this.app.workspace.trigger('react-components:component-updated');
             }
         });
-        this.registerEvent(this.app.vault.on('create', registerIfCodeBlockFile));
-        this.registerEvent(this.app.vault.on('modify', registerIfCodeBlockFile));
-        this.registerEvent(this.app.vault.on('rename', registerIfCodeBlockFile));
-        this.registerEvent(this.app.metadataCache.on('changed', registerIfCodeBlockFile));
-        this.registerEvent(this.app.metadataCache.on('resolve', registerIfCodeBlockFile));
+        this.registerEvent(this.app.vault.on('create', registerIfCodeBlockFile.bind(this)));
+        this.registerEvent(this.app.vault.on('modify', registerIfCodeBlockFile.bind(this)));
+        this.registerEvent(this.app.vault.on('rename', registerIfCodeBlockFile.bind(this)));
+        this.registerEvent(this.app.metadataCache.on('changed', registerIfCodeBlockFile.bind(this)));
+        this.registerEvent(this.app.metadataCache.on('resolve', registerIfCodeBlockFile.bind(this)));
+        this.registerEvent(
+            this.app.metadataCache.on('dataview:metadata-change', (...args) => {
+                registerIfCodeBlockFile(args[1]);
+            })
+        );
         this.registerEvent(this.app.workspace.on('layout-ready', () => this.loadComponents()));
         this.addSettingTab(new ReactComponentsSettingTab(this));
-        this.registerCodeBlockProcessor();
-        this.registerInlineCodeProcessor();
+        this.registerCodeProcessor();
         this.registerHeaderProcessor();
         this.refreshPanes();
     }
@@ -402,39 +528,43 @@ export default class ReactComponentsPlugin extends Plugin {
             if (!ctx.containerEl?.hasClass('markdown-preview-section')) {
                 return;
             }
-            const container = document.createElement('div');
-            container.addClass('reactHeaderComponent');
             const viewContainer = ctx.containerEl.parentElement;
-            const existingHeaders = [...viewContainer?.getElementsByClassName('reactHeaderComponent')];
-            existingHeaders.forEach(banner => {
-                this.ReactDOM.unmountComponentAtNode(banner);
-                banner.remove();
-            });
-            viewContainer?.insertBefore(container, ctx.containerEl);
-            this.attachComponent(
-                'const HeaderComponent = pluginInternalNoteHeaderComponent; <HeaderComponent/>',
-                container,
-                ctx
-            );
+            const existingHeader = viewContainer?.getElementsByClassName('reactHeaderComponent')?.[0];
+            const previousContext = this.renderedHeaderMap.get(existingHeader);
+            if (!previousContext || previousContext != ctx) {
+                if (existingHeader) {
+                    this.ReactDOM.unmountComponentAtNode(existingHeader);
+                    existingHeader.remove();
+                }
+                const container = document.createElement('div');
+                container.addClasses(['reactHeaderComponent', 'markdown-preview-sizer', 'markdown-preview-section']);
+                this.renderedHeaderMap.set(container, ctx);
+                viewContainer?.insertBefore(container, ctx.containerEl);
+                this.attachComponent(
+                    'const HeaderComponent = pluginInternalNoteHeaderComponent; <HeaderComponent/>',
+                    container,
+                    ctx
+                );
+            }
         });
     }
 
-    registerCodeBlockProcessor() {
-        this.registerMarkdownCodeBlockProcessor('jsx-', this.attachComponent.bind(this));
-    }
-
-    registerInlineCodeProcessor() {
+    registerCodeProcessor() {
         this.registerMarkdownPostProcessor(async (el, ctx) => {
             const codeblocks = el.querySelectorAll('code');
             const toReplace = [];
             for (let index = 0; index < codeblocks.length; index++) {
                 const codeblock = codeblocks.item(index);
-
-                const text = codeblock.innerText.trim();
-                if (!text.startsWith('jsx-')) continue;
-
-                const source = text.substring('jsx-'.length).trim();
-                toReplace.push({ codeblock, source });
+                if (codeblock.className == 'language-jsx:' || codeblock.className == 'language-jsx-') {
+                    const source = codeblock.innerText;
+                    toReplace.push({ codeblock: codeblock.parentNode, source });
+                } else {
+                    const text = codeblock.innerText.trim();
+                    if (text.startsWith('jsx-') || text.startsWith('jsx:')) {
+                        const source = text.substring('jsx-'.length).trim();
+                        toReplace.push({ codeblock, source });
+                    }
+                }
             }
             toReplace.forEach(({ codeblock, source }) => {
                 const container = document.createElement('span');
