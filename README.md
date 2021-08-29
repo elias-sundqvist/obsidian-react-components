@@ -147,6 +147,10 @@ You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-
 
 ## Changelog
 
+### 0.1.1 (2021-08-29) *Improved component unmounting*
+
+* Old components are now more reliably removed/disposed during rerenders.
+
 ### 0.1.0 (2021-08-27) *Added Alternative code block Syntax and Namespaces*
 
 * The plugin now has support for writing `jsx:` instead of `jsx-`. 

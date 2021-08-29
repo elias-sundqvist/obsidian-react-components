@@ -48,6 +48,7 @@ export default class ReactComponentsPlugin extends Plugin {
     React: typeof OfflineReact;
     ReactDOM: typeof OfflineReactDOM;
     renderedHeaderMap: WeakMap<Element, MarkdownPostProcessorContext> = new WeakMap();
+    mountPoints: Set<Element> = new Set();
 
     noteHeaderComponent: (any) => JSX.Element = () => {
         const React = this.React;
@@ -438,6 +439,12 @@ export default class ReactComponentsPlugin extends Plugin {
     async attachComponent(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
         const tryRender = async () => {
             const React = this.React;
+            try{
+                if(this.mountPoints.has(el)) {
+                    this.mountPoints.delete(el);
+                    this.ReactDOM.unmountComponentAtNode(el);
+                }
+            } catch(e){}
             try {
                 const namespace =
                     this.getPropertyValue(
@@ -458,13 +465,16 @@ export default class ReactComponentsPlugin extends Plugin {
             } catch (e) {
                 this.ReactDOM.render(<this.ErrorComponent componentName={source} error={e} />, el);
             }
+            this.mountPoints.add(el);
         };
         await tryRender.bind(this)();
         const evRef = this.app.workspace.on('react-components:component-updated', async () => {
-            console.log('Reacted to event:', 'react-components:component-updated');
             if (el && document.contains(el)) {
                 await tryRender.bind(this)();
             } else {
+                if(el) {
+                    this.ReactDOM.unmountComponentAtNode(el);
+                }
                 this.app.workspace.offref(evRef);
             }
         });
@@ -516,11 +526,10 @@ export default class ReactComponentsPlugin extends Plugin {
                 registerIfCodeBlockFile(args[1]);
             })
         );
-        this.registerEvent(this.app.workspace.on('layout-ready', () => this.loadComponents()));
         this.addSettingTab(new ReactComponentsSettingTab(this));
         this.registerCodeProcessor();
         this.registerHeaderProcessor();
-        this.refreshPanes();
+        this.app.workspace.onLayoutReady(async () => this.refreshPanes());
     }
 
     registerHeaderProcessor() {
@@ -549,8 +558,22 @@ export default class ReactComponentsPlugin extends Plugin {
         });
     }
 
+    cleanUpComponents() {
+        const toDelete = [];
+        for (const mountPoint of [...this.mountPoints]) {
+            if(!document.body.contains(mountPoint)) {
+                this.ReactDOM.unmountComponentAtNode(mountPoint);
+                toDelete.push(mountPoint);
+            }
+        }
+        for(const mountPoint of toDelete) {
+            this.mountPoints.delete(mountPoint);
+        }
+    }
+
     registerCodeProcessor() {
         this.registerMarkdownPostProcessor(async (el, ctx) => {
+            this.cleanUpComponents();
             const codeblocks = el.querySelectorAll('code');
             const toReplace = [];
             for (let index = 0; index < codeblocks.length; index++) {
@@ -580,10 +603,6 @@ export default class ReactComponentsPlugin extends Plugin {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 (leaf.view as any).previewMode.rerender(true);
         });
-    }
-
-    onunload() {
-        console.log('unloading plugin');
     }
 
     async loadSettings() {
