@@ -147,6 +147,26 @@ You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-
 
 ## Changelog
 
+### 0.1.2 (2021-12-03) *Component Codeblocks + improved startup and stability*
+* Components should no longer dissapear when navigating between views.
+* Removed flickering of components at startup. 
+* It is now possible to write codeblocks like 
+  * ````markdown
+    ```jsx::ComponentName
+    someText
+    ```
+    ````
+    Which is equivalent to  
+     ````markdown
+    ```jsx:
+    <ComponentName src={`someText`}/>
+    ```
+    ````
+    but less cluttered. 
+
+    Example:
+    ![Component Codeblock Example](https://user-images.githubusercontent.com/9102856/144520183-5dbdee07-76ae-49a6-aca6-732f53971a55.png)
+
 ### 0.1.1 (2021-08-29) *Improved component unmounting*
 
 * Old components are now more reliably removed/disposed during rerenders.

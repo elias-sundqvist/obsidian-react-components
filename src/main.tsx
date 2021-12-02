@@ -4,8 +4,6 @@ import {
     normalizePath,
     Notice,
     Plugin,
-    PluginSettingTab,
-    Setting,
     TAbstractFile,
     TFile,
     TFolder,
@@ -17,6 +15,7 @@ import OfflineReactDOM from 'react-dom';
 import Babel from '@babel/standalone';
 import isVarName from 'is-var-name';
 import reactToWebComponent from './react-webcomponent';
+import { ReactComponentsSettingTab } from './settings';
 
 type ReactComponentContextData = {
     markdownPostProcessorContext: MarkdownPostProcessorContext;
@@ -49,6 +48,7 @@ export default class ReactComponentsPlugin extends Plugin {
     ReactDOM: typeof OfflineReactDOM;
     renderedHeaderMap: WeakMap<Element, MarkdownPostProcessorContext> = new WeakMap();
     mountPoints: Set<Element> = new Set();
+    refreshTimeoutId?: NodeJS.Timeout;
 
     noteHeaderComponent: (any) => JSX.Element = () => {
         const React = this.React;
@@ -202,10 +202,10 @@ export default class ReactComponentsPlugin extends Plugin {
 
     getPropertyValue(propertyName: string, file: TFile) {
         const dataViewPropertyValue = (this.app as any)?.plugins?.plugins?.dataview?.api // eslint-disable-line
-            ?.page(file.path)?.[propertyName];
+            ?.page(file?.path)?.[propertyName];
         if (dataViewPropertyValue) {
             if (dataViewPropertyValue.path) {
-                return this.app.metadataCache.getFirstLinkpathDest(dataViewPropertyValue.path, file.path).path;
+                return this.app.metadataCache.getFirstLinkpathDest(dataViewPropertyValue?.path, file?.path)?.path;
             }
             const externalLinkMatch = /^\[.*\]\((.*)\)$/gm.exec(dataViewPropertyValue)?.[1];
             if (externalLinkMatch) {
@@ -359,7 +359,7 @@ export default class ReactComponentsPlugin extends Plugin {
             const newNoteHeaderComponent = namespaceObject[file.basename];
             if (this.noteHeaderComponent != newNoteHeaderComponent && typeof newNoteHeaderComponent == 'function') {
                 this.noteHeaderComponent = newNoteHeaderComponent;
-                this.app.workspace.trigger('react-components:component-updated');
+                this.requestComponentUpdate();
             }
         }
     }
@@ -373,7 +373,7 @@ export default class ReactComponentsPlugin extends Plugin {
             codeBlocks.set(componentName, code);
             await this.refreshComponentScope();
             if (this.settings.auto_refresh && !suppressComponentRefresh) {
-                this.app.workspace.trigger('react-components:component-updated');
+                this.requestComponentUpdate();
             }
         }
         try {
@@ -426,7 +426,7 @@ export default class ReactComponentsPlugin extends Plugin {
                 await this.registerComponents(file, true);
             }
             await this.refreshComponentScope();
-            this.app.workspace.trigger('react-components:component-updated');
+            this.requestComponentUpdate()
         } catch (e) {}
     }
 
@@ -513,9 +513,16 @@ export default class ReactComponentsPlugin extends Plugin {
             name: 'Refresh React Components',
             callback: async () => {
                 await this.loadComponents();
-                this.app.workspace.trigger('react-components:component-updated');
+                this.requestComponentUpdate();
             }
         });
+        this.addCommand({
+            id: 'cleanup-react-components',
+            name: 'Clean Up React Components',
+            callback: async () => {
+                this.cleanUpComponents();
+            }
+        })
         this.registerEvent(this.app.vault.on('create', registerIfCodeBlockFile.bind(this)));
         this.registerEvent(this.app.vault.on('modify', registerIfCodeBlockFile.bind(this)));
         this.registerEvent(this.app.vault.on('rename', registerIfCodeBlockFile.bind(this)));
@@ -530,6 +537,14 @@ export default class ReactComponentsPlugin extends Plugin {
         this.registerCodeProcessor();
         this.registerHeaderProcessor();
         this.app.workspace.onLayoutReady(async () => this.refreshPanes());
+    }
+
+    async requestComponentUpdate() {
+        if(this.refreshTimeoutId !== null) {
+            clearTimeout(this.refreshTimeoutId);
+        }
+        // Only rerender after no new request has been made for 2 seconds. 
+        this.refreshTimeoutId = setTimeout(()=>this.app.workspace.trigger('react-components:component-updated'), 2000);
     }
 
     registerHeaderProcessor() {
@@ -573,13 +588,16 @@ export default class ReactComponentsPlugin extends Plugin {
 
     registerCodeProcessor() {
         this.registerMarkdownPostProcessor(async (el, ctx) => {
-            this.cleanUpComponents();
             const codeblocks = el.querySelectorAll('code');
             const toReplace = [];
             for (let index = 0; index < codeblocks.length; index++) {
                 const codeblock = codeblocks.item(index);
                 if (codeblock.className == 'language-jsx:' || codeblock.className == 'language-jsx-') {
                     const source = codeblock.innerText;
+                    toReplace.push({ codeblock: codeblock.parentNode, source });
+                } else if (codeblock.className.startsWith('language-jsx::')) {
+                    const componentName = codeblock.className.substr('language-jsx::'.length).trim();
+                    const source = `<${componentName} src={${JSON.stringify(codeblock.innerText)}}/>`;
                     toReplace.push({ codeblock: codeblock.parentNode, source });
                 } else {
                     const text = codeblock.innerText.trim();
@@ -636,47 +654,5 @@ export default class ReactComponentsPlugin extends Plugin {
         });
 
         return files;
-    }
-}
-
-class ReactComponentsSettingTab extends PluginSettingTab {
-    plugin: ReactComponentsPlugin;
-
-    constructor(plugin: ReactComponentsPlugin) {
-        super(plugin.app, plugin);
-        this.plugin = plugin;
-    }
-
-    display(): void {
-        const { containerEl } = this;
-
-        containerEl.empty();
-
-        containerEl.createEl('h2', { text: 'React Components Settings' });
-
-        new Setting(containerEl)
-            .setName('Components folder location')
-            .setDesc('Files in this folder will be available as components/functions.')
-            .addText(text => {
-                text.setPlaceholder('Example: folder 1/folder 2')
-                    .setValue(this.plugin.settings.template_folder)
-                    .onChange(new_folder => {
-                        this.plugin.settings.template_folder = new_folder;
-                        this.plugin.loadComponents();
-                        this.plugin.saveSettings();
-                    });
-            });
-
-        new Setting(containerEl)
-            .setName('Automatically Refresh Components')
-            .setDesc(
-                'Useful to disable if reloading components is costly (like if they perform api calls or read a lot of files). To refresh the components manually, run the `Refresh React Components` command'
-            )
-            .addToggle(toggle => {
-                toggle.setValue(this.plugin.settings.auto_refresh).onChange(auto_refresh => {
-                    this.plugin.settings.auto_refresh = auto_refresh;
-                    this.plugin.saveSettings();
-                });
-            });
     }
 }
