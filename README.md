@@ -147,8 +147,13 @@ You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-
 
 ## Changelog
 
+### 0.1.3 (2022-01-01) *Basic Live Preview Support*
+* Both code blocks and inline code is supported.
+![live preview](https://user-images.githubusercontent.com/9102856/147861506-abb023d1-4ba1-4e46-bb33-504bf259a2ca.gif)
+
+
 ### 0.1.2 (2021-12-03) *Component Codeblocks + improved startup and stability*
-* Components should no longer dissapear when navigating between views.
+* Components should no longer dissappear when navigating between views.
 * Removed flickering of components at startup. 
 * It is now possible to write codeblocks like 
   * ````markdown

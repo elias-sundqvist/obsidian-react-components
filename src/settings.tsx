@@ -1,5 +1,5 @@
-import { PluginSettingTab, Setting } from "obsidian";
-import ReactComponentsPlugin from "./main";
+import { PluginSettingTab, Setting } from 'obsidian';
+import ReactComponentsPlugin from './main';
 
 export class ReactComponentsSettingTab extends PluginSettingTab {
     plugin: ReactComponentsPlugin;

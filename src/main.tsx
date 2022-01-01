@@ -15,7 +15,11 @@ import OfflineReactDOM from 'react-dom';
 import Babel from '@babel/standalone';
 import isVarName from 'is-var-name';
 import reactToWebComponent from './react-webcomponent';
+import { tokenClassNodeProp } from '@codemirror/stream-parser';
 import { ReactComponentsSettingTab } from './settings';
+import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
+import { RangeSetBuilder } from '@codemirror/rangeset';
+import { syntaxTree } from '@codemirror/language';
 
 type ReactComponentContextData = {
     markdownPostProcessorContext: MarkdownPostProcessorContext;
@@ -426,7 +430,7 @@ export default class ReactComponentsPlugin extends Plugin {
                 await this.registerComponents(file, true);
             }
             await this.refreshComponentScope();
-            this.requestComponentUpdate()
+            this.requestComponentUpdate();
         } catch (e) {}
     }
 
@@ -439,12 +443,12 @@ export default class ReactComponentsPlugin extends Plugin {
     async attachComponent(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
         const tryRender = async () => {
             const React = this.React;
-            try{
-                if(this.mountPoints.has(el)) {
+            try {
+                if (this.mountPoints.has(el)) {
                     this.mountPoints.delete(el);
                     this.ReactDOM.unmountComponentAtNode(el);
                 }
-            } catch(e){}
+            } catch (e) {}
             try {
                 const namespace =
                     this.getPropertyValue(
@@ -472,7 +476,7 @@ export default class ReactComponentsPlugin extends Plugin {
             if (el && document.contains(el)) {
                 await tryRender.bind(this)();
             } else {
-                if(el) {
+                if (el) {
                     this.ReactDOM.unmountComponentAtNode(el);
                 }
                 this.app.workspace.offref(evRef);
@@ -522,7 +526,7 @@ export default class ReactComponentsPlugin extends Plugin {
             callback: async () => {
                 this.cleanUpComponents();
             }
-        })
+        });
         this.registerEvent(this.app.vault.on('create', registerIfCodeBlockFile.bind(this)));
         this.registerEvent(this.app.vault.on('modify', registerIfCodeBlockFile.bind(this)));
         this.registerEvent(this.app.vault.on('rename', registerIfCodeBlockFile.bind(this)));
@@ -534,17 +538,185 @@ export default class ReactComponentsPlugin extends Plugin {
             })
         );
         this.addSettingTab(new ReactComponentsSettingTab(this));
+
+        const ext = this.getLivePostprocessor();
+        this.registerEditorExtension(ext);
         this.registerCodeProcessor();
         this.registerHeaderProcessor();
         this.app.workspace.onLayoutReady(async () => this.refreshPanes());
     }
 
+    getLivePostprocessor() {
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        const plugin = this;
+        class JsxWidget extends WidgetType {
+            constructor(public el: HTMLElement, public code: string) {
+                super();
+            }
+            toDOM(): HTMLElement {
+                return this.el;
+            }
+            eq(other: JsxWidget) {
+                return other.code === this.code;
+            }
+            ignoreEvent() {
+                return false;
+            }
+            destroy(): void {
+                /* try{
+                    plugin.ReactDOM.unmountComponentAtNode(this.el);
+                } catch(e){}
+                try{
+                    this.el.remove();
+                } catch(e){} */
+            }
+        }
+
+        class LivePlugin {
+            decorations: DecorationSet;
+            selectedDecorations: Set<Decoration>;
+            view: EditorView;
+            constructor(view: EditorView) {
+                this.view = view;
+                this.build(view);
+            }
+            update(update: ViewUpdate) {
+                this.view = update.view;
+                if (update.docChanged || update.viewportChanged) {
+                    //rebuild
+                    this.build(update.view);
+                }
+            }
+            destroy(): void {
+                return void 0;
+            }
+            build(view: EditorView) {
+                try {
+                    const builder = new RangeSetBuilder<Decoration>();
+                    const createJsxDecoration = (code, from, to, isBlock = false) => {
+                        console.log({ from, to });
+                        const el = document.createElement('span');
+
+                        plugin.attachComponent(code, el, ctx);
+
+                        const deco = Decoration.widget({
+                            widget: new JsxWidget(el, code),
+                            block: isBlock,
+                            from,
+                            to
+                        });
+
+                        builder.add(
+                            Math.max(0, from - 1),
+                            to + 1,
+                            Decoration.replace({
+                                from,
+                                to
+                            })
+                        );
+                        builder.add(to + 1, to + 1, deco);
+                    };
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const leaf: obsidian.FileView = Object.keys((view.state as any).config.address)
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        .map(x => (view.state as any).field({ id: x }))
+                        .filter(x => x?.file)[0];
+                    const ctx: MarkdownPostProcessorContext = {
+                        docId: null,
+                        sourcePath: leaf?.file?.path || '',
+                        frontmatter: null,
+                        addChild: null,
+                        getSectionInfo: null
+                    };
+
+                    let codeblockStart: { from: number; to: number; strippedCodeblockHeader: string };
+
+                    for (const { from, to } of view.visibleRanges) {
+                        view.state.selection.ranges.map(r => r.from);
+                        syntaxTree(view.state).iterate({
+                            from,
+                            to,
+                            enter: (type, from, to) => {
+                                const tokens = type.prop(tokenClassNodeProp);
+                                const props = new Set(tokens?.split(' '));
+                                const propNames = new Set(
+                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                    Object.values((type as any).props || {})
+                                        .filter(x => typeof x === 'string')
+                                        .flatMap((x: string) => x.split(' '))
+                                );
+                                console.log({ props, type, from, to });
+                                if (propNames.has('HyperMD-codeblock-begin')) {
+                                    console.log('encountered codeblock beginning');
+                                    const codeblockHeader = view.state.doc.sliceString(from, to);
+                                    const strippedCodeblockHeader = /^`*(.*)/gm.exec(codeblockHeader)?.[1]?.trim();
+                                    console.log({ codeblockHeader, strippedCodeblockHeader });
+                                    if (!strippedCodeblockHeader) return;
+                                    if (
+                                        strippedCodeblockHeader.startsWith('jsx:') ||
+                                        strippedCodeblockHeader.startsWith('jsx-')
+                                    ) {
+                                        console.log('stored...');
+                                        codeblockStart = { from, to, strippedCodeblockHeader };
+                                    }
+                                    return;
+                                }
+                                if (propNames.has('HyperMD-codeblock-end') && codeblockStart) {
+                                    console.log('encountered codeblock end');
+                                    const code = view.state.doc.sliceString(codeblockStart.to, from)?.trim();
+                                    console.log({ code });
+                                    if (
+                                        codeblockStart.strippedCodeblockHeader == 'jsx:' ||
+                                        codeblockStart.strippedCodeblockHeader == 'jsx-'
+                                    ) {
+                                        createJsxDecoration(code, codeblockStart.from, to, true);
+                                    } else if (codeblockStart.strippedCodeblockHeader.startsWith('jsx::')) {
+                                        const componentName = codeblockStart.strippedCodeblockHeader
+                                            .substr('jsx::'.length)
+                                            .trim();
+                                        const source = `<${componentName} src={${JSON.stringify(code)}}/>`;
+                                        createJsxDecoration(source, codeblockStart.from, to, true);
+                                    }
+                                    codeblockStart = null;
+                                }
+                                if (!props.has('inline-code')) return;
+                                if (props.has('formatting')) return;
+                                const line = view.state.doc.sliceString(from, to);
+                                if (!/^jsx:/.test(line)) return;
+
+                                const [, code] = line.match(/^jsx:\s?(.+)/) ?? [];
+                                if (!code?.trim().length) return;
+                                createJsxDecoration(code, from, to);
+                            }
+                        });
+                    }
+                    this.decorations = builder.finish();
+                } catch (e) {
+                    debugger;
+                }
+            }
+        }
+
+        return ViewPlugin.fromClass(LivePlugin, {
+            decorations: v => {
+                return v.decorations.update({
+                    filter: (from, to) =>
+                        from == to ||
+                        !v.view.state.selection.ranges.filter(r => (r.from < from ? r.to > from : r.from < to)).length
+                });
+            }
+        });
+    }
+
     async requestComponentUpdate() {
-        if(this.refreshTimeoutId !== null) {
+        if (this.refreshTimeoutId !== null) {
             clearTimeout(this.refreshTimeoutId);
         }
-        // Only rerender after no new request has been made for 2 seconds. 
-        this.refreshTimeoutId = setTimeout(()=>this.app.workspace.trigger('react-components:component-updated'), 2000);
+        // Only rerender after no new request has been made for 2 seconds.
+        this.refreshTimeoutId = setTimeout(
+            () => this.app.workspace.trigger('react-components:component-updated'),
+            2000
+        );
     }
 
     registerHeaderProcessor() {
@@ -576,12 +748,12 @@ export default class ReactComponentsPlugin extends Plugin {
     cleanUpComponents() {
         const toDelete = [];
         for (const mountPoint of [...this.mountPoints]) {
-            if(!document.body.contains(mountPoint)) {
+            if (!document.body.contains(mountPoint)) {
                 this.ReactDOM.unmountComponentAtNode(mountPoint);
                 toDelete.push(mountPoint);
             }
         }
-        for(const mountPoint of toDelete) {
+        for (const mountPoint of toDelete) {
             this.mountPoints.delete(mountPoint);
         }
     }
