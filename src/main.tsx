@@ -539,8 +539,13 @@ export default class ReactComponentsPlugin extends Plugin {
         );
         this.addSettingTab(new ReactComponentsSettingTab(this));
 
-        const ext = this.getLivePostprocessor();
-        this.registerEditorExtension(ext);
+        try {
+            const ext = this.getLivePostprocessor();
+            this.registerEditorExtension(ext);
+        } catch (e) {
+            console.log('obsidian-react-components: Could not enable live preview. See error below.');
+            console.error(e);
+        }
         this.registerCodeProcessor();
         this.registerHeaderProcessor();
         this.app.workspace.onLayoutReady(async () => this.refreshPanes());
