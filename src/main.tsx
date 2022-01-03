@@ -87,7 +87,8 @@ export default class ReactComponentsPlugin extends Plugin {
                         setTimeout(() => {
                             throw error;
                         }, 1)
-                    }>
+                    }
+                >
                     Show In Console
                 </button>
             </span>
@@ -494,9 +495,11 @@ export default class ReactComponentsPlugin extends Plugin {
             this.React = (await this.importFromUrl('https://cdn.skypack.dev/react')).default;
             this.ReactDOM = (await this.importFromUrl('https://cdn.skypack.dev/react-dom')).default;
         } catch (e) {
+            // eslint-disable-next-line no-console
             console.log('Failed to load online react package. Skypack react imports may not work.');
             this.React = OfflineReact;
             this.ReactDOM = OfflineReactDOM;
+            // eslint-disable-next-line no-console
             console.log('Error:', e);
         }
         await this.loadSettings();
@@ -543,6 +546,7 @@ export default class ReactComponentsPlugin extends Plugin {
             const ext = this.getLivePostprocessor();
             this.registerEditorExtension(ext);
         } catch (e) {
+            // eslint-disable-next-line no-console
             console.log('obsidian-react-components: Could not enable live preview. See error below.');
             console.error(e);
         }
@@ -599,7 +603,6 @@ export default class ReactComponentsPlugin extends Plugin {
                 try {
                     const builder = new RangeSetBuilder<Decoration>();
                     const createJsxDecoration = (code, from, to, isBlock = false) => {
-                        console.log({ from, to });
                         const el = document.createElement('span');
 
                         plugin.attachComponent(code, el, ctx);
@@ -650,26 +653,20 @@ export default class ReactComponentsPlugin extends Plugin {
                                         .filter(x => typeof x === 'string')
                                         .flatMap((x: string) => x.split(' '))
                                 );
-                                console.log({ props, type, from, to });
                                 if (propNames.has('HyperMD-codeblock-begin')) {
-                                    console.log('encountered codeblock beginning');
                                     const codeblockHeader = view.state.doc.sliceString(from, to);
                                     const strippedCodeblockHeader = /^`*(.*)/gm.exec(codeblockHeader)?.[1]?.trim();
-                                    console.log({ codeblockHeader, strippedCodeblockHeader });
                                     if (!strippedCodeblockHeader) return;
                                     if (
                                         strippedCodeblockHeader.startsWith('jsx:') ||
                                         strippedCodeblockHeader.startsWith('jsx-')
                                     ) {
-                                        console.log('stored...');
                                         codeblockStart = { from, to, strippedCodeblockHeader };
                                     }
                                     return;
                                 }
                                 if (propNames.has('HyperMD-codeblock-end') && codeblockStart) {
-                                    console.log('encountered codeblock end');
                                     const code = view.state.doc.sliceString(codeblockStart.to, from)?.trim();
-                                    console.log({ code });
                                     if (
                                         codeblockStart.strippedCodeblockHeader == 'jsx:' ||
                                         codeblockStart.strippedCodeblockHeader == 'jsx-'

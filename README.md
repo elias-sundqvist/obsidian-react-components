@@ -147,6 +147,9 @@ You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-
 
 ## Changelog
 
+### 0.1.5 (2022-01-03) *Removed Debug Logging*
+* A lot of `console.log` calls were used when adding the live preview support. These have now been removed.  
+
 ### 0.1.4 (2022-01-02) *App Fix*
 * The plugin should now work on in the app version of Obsidian again. 
 
