@@ -147,6 +147,10 @@ You can make a [pull request](https://github.com/elias-sundqvist/obsidian-react-
 
 ## Changelog
 
+### 0.1.6 (2022-01-22) *Obsidian v0.13.19 support*
+* jsx codeblocks broke in a recent obsidian update (See issue #26). With this update, they should work better again. 
+* Added support for embedded notes in the `Markdown` component (See issue #25).
+
 ### 0.1.5 (2022-01-03) *Removed Debug Logging*
 * A lot of `console.log` calls were used when adding the live preview support. These have now been removed.  
 
