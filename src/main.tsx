@@ -582,8 +582,9 @@ export default class ReactComponentsPlugin extends Plugin {
             ) {
                 el.innerHTML = '';
             } else {
-                el.innerHTML = `<pre class="language-jsx" tabindex="0"><code class="language-jsx"></code><button class="copy-code-button">Copy</button></pre>`;
-                el.getElementsByTagName('code')[0].innerText = source;
+                this.attachComponent(`<Markdown src={${JSON.stringify(
+                    '```tsx\n' + source + '\n```'
+                )}}/>`, el, ctx);
             }
         });
 
@@ -712,16 +713,16 @@ export default class ReactComponentsPlugin extends Plugin {
                                         codeblockStart.strippedCodeblockHeader == 'jsx-'
                                     ) {
                                         createJsxDecoration(code, codeblockStart.from, to, true);
-                                    } else if (codeblockStart.strippedCodeblockHeader == 'jsx') {
-                                        const source = `<Markdown src={${JSON.stringify(
-                                            '```jsx\n' + code + '\n```'
-                                        )}}/>`;
-                                        createJsxDecoration(source, codeblockStart.from, to, true);
                                     } else if (codeblockStart.strippedCodeblockHeader.startsWith('jsx::')) {
                                         const componentName = codeblockStart.strippedCodeblockHeader
                                             .substr('jsx::'.length)
                                             .trim();
                                         const source = `<${componentName} src={${JSON.stringify(code)}}/>`;
+                                        createJsxDecoration(source, codeblockStart.from, to, true);
+                                    } else if (codeblockStart.strippedCodeblockHeader.startsWith('jsx')) {
+                                        const source = `<Markdown src={${JSON.stringify(
+                                            '```tsx\n' + code + '\n```'
+                                        )}}/>`;
                                         createJsxDecoration(source, codeblockStart.from, to, true);
                                     }
                                     codeblockStart = null;
