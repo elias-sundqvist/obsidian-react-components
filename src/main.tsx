@@ -20,6 +20,7 @@ import { ReactComponentsSettingTab } from './settings';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
 import { RangeSetBuilder } from '@codemirror/rangeset';
 import { syntaxTree } from '@codemirror/language';
+import { paramCase } from 'change-case';
 
 type ReactComponentContextData = {
     markdownPostProcessorContext: MarkdownPostProcessorContext;
@@ -60,6 +61,54 @@ export default class ReactComponentsPlugin extends Plugin {
     };
 
     ReactComponentContext: OfflineReact.Context<ReactComponentContextData>;
+
+    ObsidianContextProvider = ({ctx, render})=>{
+        const React = this.React;
+        const [context, setContext] =  React.useState(ctx);
+        const [content, setContent] =  React.useState(<></>);
+        const divRef =  React.useRef<HTMLDivElement>();
+
+        this.React.useEffect(()=>{
+            (async ()=>{
+                for(let i=0; i<1000; i++) {
+                    const file = ((a=[])=>{
+                            this.app.workspace.iterateAllLeaves(x=>{
+                            if((x as any)?.containerEl.contains(divRef.current) && x?.view?.file){
+                                a.push(x.view.file)
+                            }
+                        });
+                        return a;
+                    })()?.[0];
+                    if(file) {
+                        const context: MarkdownPostProcessorContext = {
+                            docId: null,
+                            sourcePath: file?.path || '',
+                            frontmatter: null,
+                            addChild: null,
+                            getSectionInfo: null
+                        };
+                        return setContext(context);
+                    }
+                    await new Promise(r => setTimeout(r, 50));
+                }
+            })()
+        },[])
+
+        React.useEffect(()=>{
+            if(context){
+                (async ()=>{
+                    setContent(await render(context))
+                })()
+            }
+        }, [context])
+
+        if(!context) {
+            return <div ref={divRef}>Loading context....</div>
+        } else {
+            return content
+        }
+    }
+
     Markdown = ({ src, maxDepth = 10 }: { src: string; maxDepth: number }) => {
         const React = this.React;
         const { useContext, useRef, useEffect } = React;
@@ -239,7 +288,9 @@ export default class ReactComponentsPlugin extends Plugin {
     }
 
     getPropertyValue(propertyName: string, file: TFile) {
-        const dataViewPropertyValue = (this.app as any)?.plugins?.plugins?.dataview?.api // eslint-disable-line
+        let dataViewPropertyValue = null
+        try{
+            dataViewPropertyValue = (this.app as any)?.plugins?.plugins?.dataview?.api // eslint-disable-line
             ?.page(file?.path)?.[propertyName];
         if (dataViewPropertyValue) {
             if (dataViewPropertyValue.path) {
@@ -253,6 +304,8 @@ export default class ReactComponentsPlugin extends Plugin {
         } else {
             const cache = this.app.metadataCache.getFileCache(file);
             return cache?.frontmatter?.[propertyName];
+        }
+        } catch(e){
         }
     }
 
@@ -298,7 +351,9 @@ export default class ReactComponentsPlugin extends Plugin {
                 componentTag,
                 reactToWebComponent(this.webComponentBase(componentTag), this.React, this.ReactDOM)
             );
-        } catch (e) {}
+        } catch (e) {
+            console.log(e)
+        }
     }
 
     wrapCode(content: string, namespace: string) {
@@ -404,6 +459,21 @@ export default class ReactComponentsPlugin extends Plugin {
 
     async registerComponent(content: string, componentName: string, componentNamespace, suppressComponentRefresh) {
         const code = () => this.wrapCode(content, componentNamespace);
+
+        try {
+            const componentTag = paramCase(componentName).trim()
+
+            if (componentTag.includes("-")) {
+                const wasRegistered = !!this.webComponents[componentTag];
+                this.webComponents[componentTag] = componentName;
+                if (!wasRegistered) {
+                    this.registerWebComponent(componentTag);
+                }
+            }
+        } catch(e) {
+
+        }
+
         const codeString = code();
         const namespaceObject = this.getNamespaceObject(componentNamespace);
         const codeBlocks = namespaceObject[CodeBlockSymbol];
@@ -458,6 +528,7 @@ export default class ReactComponentsPlugin extends Plugin {
     async loadComponents() {
         this.namespaceRoot = {};
         this.webComponents = {};
+        
         try {
             await this.awaitFilesLoaded();
             for (const file of this.app.vault.getMarkdownFiles()) {
@@ -474,7 +545,7 @@ export default class ReactComponentsPlugin extends Plugin {
         };
     }
 
-    async attachComponent(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
+    async attachComponent(source: string, el: HTMLElement, ctx?: MarkdownPostProcessorContext) {
         const tryRender = async () => {
             const React = this.React;
             try {
@@ -484,20 +555,24 @@ export default class ReactComponentsPlugin extends Plugin {
                 }
             } catch (e) {}
             try {
-                const namespace =
-                    this.getPropertyValue(
-                        'react-components-namespace',
-                        this.app.vault.getAbstractFileByPath(ctx.sourcePath) as TFile
-                    ) ?? 'Global';
-                const context = this.generateReactComponentContext(ctx);
-                const evaluated = await this.evalAdapter(
-                    this.transpileCode(this.wrapInNoteCode(source, namespace)),
-                    namespace
-                );
+                
                 this.ReactDOM.render(
-                    <this.ReactComponentContext.Provider value={context}>
-                        {evaluated}
-                    </this.ReactComponentContext.Provider>,
+                    <this.ObsidianContextProvider ctx={ctx} render={async ctx=>{
+                        const context = this.generateReactComponentContext(ctx);
+                        const namespace =
+                            this.getPropertyValue(
+                                'react-components-namespace',
+                                this.app.vault.getAbstractFileByPath(ctx.sourcePath) as TFile
+                            ) ?? 'Global';
+
+                        const evaluated = await this.evalAdapter(
+                            this.transpileCode(this.wrapInNoteCode(source, namespace)),
+                            namespace
+                        );
+                        return <this.ReactComponentContext.Provider value={context}>
+                            {evaluated}
+                        </this.ReactComponentContext.Provider>
+                    }}/>,
                     el
                 );
             } catch (e) {
@@ -523,6 +598,37 @@ export default class ReactComponentsPlugin extends Plugin {
         return importf(url);
     }
 
+    oldDomPurifySanitize: any
+
+    patchSanitization(){
+        this.oldDomPurifySanitize = (global as any).DOMPurify.sanitize;
+
+        (global as any).DOMPurify.sanitize = (html, config)=>{
+            const container = document.createElement('div');
+
+            const isValidReactCode = (()=>{
+                try {
+                    this.transpileCode(html);
+                    return true;
+                } catch(e) {
+                    return false;
+                }
+            })()
+
+            if(isValidReactCode){    
+                this.attachComponent(html, container);
+                return container;
+            } else {
+                return this.oldDomPurifySanitize(html, config);
+            }
+        }
+    }
+
+    unpatchSanitization(){
+        (global as any).DOMPurify.sanitize = this.oldDomPurifySanitize
+    }
+
+
     async onload() {
         try {
             this.React = (await this.importFromUrl('https://cdn.skypack.dev/react')).default;
@@ -535,9 +641,12 @@ export default class ReactComponentsPlugin extends Plugin {
             // eslint-disable-next-line no-console
             console.log('Error:', e);
         }
+        this.patchSanitization()
         await this.loadSettings();
         this.ReactComponentContext = this.React.createContext<ReactComponentContextData>(null);
         await this.loadComponents();
+
+
         const registerIfCodeBlockFile = file => {
             if (
                 file instanceof TFile &&
@@ -599,6 +708,10 @@ export default class ReactComponentsPlugin extends Plugin {
         this.registerCodeProcessor();
         this.registerHeaderProcessor();
         this.app.workspace.onLayoutReady(async () => this.refreshPanes());
+    }
+
+    unload() {
+        this.unpatchSanitization()
     }
 
     getLivePostprocessor() {
