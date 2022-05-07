@@ -14,13 +14,11 @@ import OfflineReact from 'react';
 import OfflineReactDOM from 'react-dom';
 import Babel from '@babel/standalone';
 import isVarName from 'is-var-name';
-import reactToWebComponent from './react-webcomponent';
 import { tokenClassNodeProp } from '@codemirror/stream-parser';
 import { ReactComponentsSettingTab } from './settings';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
 import { RangeSetBuilder } from '@codemirror/rangeset';
 import { syntaxTree } from '@codemirror/language';
-import { paramCase } from 'change-case';
 
 type ReactComponentContextData = {
     markdownPostProcessorContext: MarkdownPostProcessorContext;
@@ -28,11 +26,15 @@ type ReactComponentContextData = {
 
 const DEFAULT_SETTINGS: ReactComponentsSettings = {
     template_folder: '',
-    auto_refresh: true
+    auto_refresh: true,
+    live_preview: true,
+    patch_html_rendering: true
 };
 
 interface ReactComponentsSettings {
     template_folder: string;
+    patch_html_rendering: boolean;
+    live_preview: boolean;
     auto_refresh: boolean;
 }
 
@@ -48,7 +50,6 @@ type NamespaceObject = {
 export default class ReactComponentsPlugin extends Plugin {
     settings: ReactComponentsSettings;
     namespaceRoot: NamespaceObject;
-    webComponents: Record<string, string>;
     React: typeof OfflineReact;
     ReactDOM: typeof OfflineReactDOM;
     renderedHeaderMap: WeakMap<Element, MarkdownPostProcessorContext> = new WeakMap();
@@ -62,7 +63,7 @@ export default class ReactComponentsPlugin extends Plugin {
 
     ReactComponentContext: OfflineReact.Context<ReactComponentContextData>;
 
-    ObsidianContextProvider = ({ctx, render})=>{
+    ObsidianContextProvider = ({ctx, render, source})=>{
         const React = this.React;
         const [context, setContext] =  React.useState(ctx);
         const [content, setContent] =  React.useState(<></>);
@@ -97,13 +98,17 @@ export default class ReactComponentsPlugin extends Plugin {
         React.useEffect(()=>{
             if(context){
                 (async ()=>{
-                    setContent(await render(context))
+                    try {
+                        setContent(await render(context))
+                    } catch(e) {
+                        setContent(<this.ErrorComponent componentName={source} error={e} />)
+                    }
                 })()
             }
         }, [context])
 
         if(!context) {
-            return <div ref={divRef}>Loading context....</div>
+            return <span ref={divRef}>Loading context....</span>
         } else {
             return content
         }
@@ -174,32 +179,6 @@ export default class ReactComponentsPlugin extends Plugin {
                     Show In Console
                 </button>
             </span>
-        );
-    };
-
-    // eslint-disable-next-line react/display-name
-    webComponentBase = tagName => props => {
-        const React = this.React;
-        const { useState, useEffect } = React;
-        const setRefresh = useState<number>()[1];
-        const [component, setComponent] = useState<string>();
-        const namespaceObject = this.getNamespaceObject('Global');
-        const possibleComponent = namespaceObject[component];
-        const Component = typeof possibleComponent == 'function' ? possibleComponent : () => <h1>Nothing Here Yet</h1>;
-
-        useEffect(() => {
-            setComponent(this.webComponents[tagName]);
-            this.app.workspace.on('react-components:component-updated', () => {
-                setComponent(this.webComponents[tagName]);
-                setRefresh(Math.random());
-            });
-        }, []);
-
-        const context = this.generateReactComponentContext(null);
-        return (
-            <this.ReactComponentContext.Provider value={context}>
-                <Component {...props} />
-            </this.ReactComponentContext.Provider>
         );
     };
 
@@ -345,17 +324,6 @@ export default class ReactComponentsPlugin extends Plugin {
         }
     }
 
-    registerWebComponent(componentTag: string) {
-        try {
-            customElements.define(
-                componentTag,
-                reactToWebComponent(this.webComponentBase(componentTag), this.React, this.ReactDOM)
-            );
-        } catch (e) {
-            console.log(e)
-        }
-    }
-
     wrapCode(content: string, namespace: string) {
         const importsRegexp = /^\s*import\s(.|\s)*?\sfrom\s.*?$/gm;
         const imports = [];
@@ -431,16 +399,6 @@ export default class ReactComponentsPlugin extends Plugin {
         let content = await this.app.vault.read(file);
         content = this.removeFrontMatter(content);
 
-        const webComponentPropertyValue = this.getPropertyValue('web-component', file);
-
-        if (webComponentPropertyValue) {
-            const componentTag = webComponentPropertyValue.trim();
-            const wasRegistered = !!this.webComponents[componentTag];
-            this.webComponents[componentTag] = file.basename;
-            if (!wasRegistered) {
-                this.registerWebComponent(componentTag);
-            }
-        }
         const namespace = 'Global';
 
         await this.registerComponent(content, file.basename, namespace, suppressComponentRefresh);
@@ -459,20 +417,6 @@ export default class ReactComponentsPlugin extends Plugin {
 
     async registerComponent(content: string, componentName: string, componentNamespace, suppressComponentRefresh) {
         const code = () => this.wrapCode(content, componentNamespace);
-
-        try {
-            const componentTag = paramCase(componentName).trim()
-
-            if (componentTag.includes("-")) {
-                const wasRegistered = !!this.webComponents[componentTag];
-                this.webComponents[componentTag] = componentName;
-                if (!wasRegistered) {
-                    this.registerWebComponent(componentTag);
-                }
-            }
-        } catch(e) {
-
-        }
 
         const codeString = code();
         const namespaceObject = this.getNamespaceObject(componentNamespace);
@@ -527,7 +471,6 @@ export default class ReactComponentsPlugin extends Plugin {
 
     async loadComponents() {
         this.namespaceRoot = {};
-        this.webComponents = {};
         
         try {
             await this.awaitFilesLoaded();
@@ -557,7 +500,7 @@ export default class ReactComponentsPlugin extends Plugin {
             try {
                 
                 this.ReactDOM.render(
-                    <this.ObsidianContextProvider ctx={ctx} render={async ctx=>{
+                    <this.ObsidianContextProvider ctx={ctx} source={source} render={async ctx=>{
                         const context = this.generateReactComponentContext(ctx);
                         const namespace =
                             this.getPropertyValue(
@@ -604,7 +547,10 @@ export default class ReactComponentsPlugin extends Plugin {
         this.oldDomPurifySanitize = (global as any).DOMPurify.sanitize;
 
         (global as any).DOMPurify.sanitize = (html, config)=>{
-            const container = document.createElement('div');
+            const pureHtml = this.oldDomPurifySanitize(html, {...config, RETURN_DOM_FRAGMENT: false});
+            const isPureHtml = (el=>((el.innerHTML=html)&&el.innerHTML)==pureHtml)(document.createElement('div'));
+
+            const container = document.createElement('span');
 
             const isValidReactCode = (()=>{
                 try {
@@ -615,7 +561,7 @@ export default class ReactComponentsPlugin extends Plugin {
                 }
             })()
 
-            if(isValidReactCode){    
+            if(!isPureHtml && isValidReactCode){    
                 this.attachComponent(html, container);
                 return container;
             } else {
@@ -625,8 +571,12 @@ export default class ReactComponentsPlugin extends Plugin {
     }
 
     unpatchSanitization(){
-        (global as any).DOMPurify.sanitize = this.oldDomPurifySanitize
+        if(this.oldDomPurifySanitize){
+            (global as any).DOMPurify.sanitize = this.oldDomPurifySanitize
+        }
     }
+
+
 
 
     async onload() {
@@ -641,8 +591,10 @@ export default class ReactComponentsPlugin extends Plugin {
             // eslint-disable-next-line no-console
             console.log('Error:', e);
         }
-        this.patchSanitization()
         await this.loadSettings();
+        if(this.settings.patch_html_rendering) {
+            this.patchSanitization();
+        }
         this.ReactComponentContext = this.React.createContext<ReactComponentContextData>(null);
         await this.loadComponents();
 
@@ -684,22 +636,25 @@ export default class ReactComponentsPlugin extends Plugin {
         );
         this.addSettingTab(new ReactComponentsSettingTab(this));
 
-        this.registerMarkdownCodeBlockProcessor('jsx', async (source, el, ctx) => {
-            if (
-                (ctx.containerEl.closest('.workspace-leaf-content') as HTMLElement).dataset['mode'] === 'source' &&
-                !el.closest('.cm-line')
-            ) {
-                el.innerHTML = '';
-            } else {
-                this.attachComponent(`<Markdown src={${JSON.stringify(
-                    '```tsx\n' + source + '\n```'
-                )}}/>`, el, ctx);
-            }
-        });
-
         try {
-            const ext = this.getLivePostprocessor();
-            this.registerEditorExtension(ext);
+            if(this.settings.live_preview) {
+                
+                this.registerMarkdownCodeBlockProcessor('jsx', async (source, el, ctx) => {
+                    if (
+                        (ctx.containerEl.closest('.workspace-leaf-content') as HTMLElement).dataset['mode'] === 'source' &&
+                        !el.closest('.cm-line')
+                    ) {
+                        el.innerHTML = '';
+                    } else {
+                        this.attachComponent(`<Markdown src={${JSON.stringify(
+                            '```tsx\n' + source + '\n```'
+                        )}}/>`, el, ctx);
+                    }
+                });
+
+                const ext = this.getLivePostprocessor();
+                this.registerEditorExtension(ext);
+            }
         } catch (e) {
             // eslint-disable-next-line no-console
             console.log('obsidian-react-components: Could not enable live preview. See error below.');
