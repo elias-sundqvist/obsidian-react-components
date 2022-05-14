@@ -1,4 +1,4 @@
-import { attachComponent } from './core';
+import { attachComponent } from './componentRendering';
 import ReactComponentsPlugin from './main';
 
 export function registerCodeProcessor() {

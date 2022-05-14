@@ -3,23 +3,17 @@ import OfflineReact from 'react';
 import OfflineReactDOM from 'react-dom';
 import { DEFAULT_SETTINGS, ReactComponentsSettings, ReactComponentsSettingTab } from './settings';
 import { ParentAndChild } from './parentAndChild';
-import { RootComponent } from './components/RootComponent';
 import { registerCodeProcessor } from './preview';
 import { registerHeaderProcessor } from './header';
 import { refreshPanes } from './workspace_utils';
-import { patchSanitization, unpatchSanitization } from './htmlRendering';
-import {
-    attachComponent,
-    clearComponentNamespace,
-    importFromUrl,
-    loadComponents,
-    NamespaceObject,
-    ReactComponentContextData,
-    registerComponents,
-    requestComponentUpdate
-} from './core';
-import { getPropertyValue } from './fileUtils';
-import { getLivePostprocessor } from './livePreview';
+import { unpatchSanitization } from './htmlRendering';
+import { awaitFilesLoaded, getPropertyValue } from './fileUtils';
+import { clearComponentNamespace, NamespaceObject } from './namespaces';
+import { importFromUrl } from './urlImport';
+import { registerComponents } from './componentRegistry';
+import { requestComponentUpdate, setupComponentRendering } from './componentRendering';
+import { refreshComponentScope } from './scope';
+import { ReactComponentContextData } from './reactComponentContext';
 
 export default class ReactComponentsPlugin extends Plugin {
     static instance: ReactComponentsPlugin = null;
@@ -43,8 +37,7 @@ export default class ReactComponentsPlugin extends Plugin {
     elementJsxElemMap: WeakMap<HTMLElement, OfflineReact.FunctionComponentElement<any>>;
     elementJsxFuncMap: WeakMap<HTMLElement, () => OfflineReact.FunctionComponentElement<any>>;
 
-    async onload() {
-        ReactComponentsPlugin.instance = this;
+    async setupReact() {
         try {
             this.React = (await importFromUrl('https://cdn.skypack.dev/react')).default;
             this.ReactDOM = (await importFromUrl('https://cdn.skypack.dev/react-dom')).default;
@@ -56,19 +49,27 @@ export default class ReactComponentsPlugin extends Plugin {
             // eslint-disable-next-line no-console
             console.log('Error:', e);
         }
+    }
 
-        this.reactRoot = document.createElement('div');
-        const React = this.React;
-        this.elementJsxElemMap = new WeakMap<HTMLElement, OfflineReact.FunctionComponentElement<any>>();
-        this.elementJsxFuncMap = new WeakMap<HTMLElement, () => OfflineReact.FunctionComponentElement<any>>();
+    async loadComponents() {
+        try {
+            await awaitFilesLoaded();
+            for (const file of ReactComponentsPlugin.instance.app.vault.getMarkdownFiles()) {
+                await registerComponents(file, true);
+            }
+            await refreshComponentScope();
+            await requestComponentUpdate();
+        } catch (e) {}
+    }
 
-        this.ReactDOM.render(<RootComponent />, this.reactRoot);
-
+    async onload() {
+        ReactComponentsPlugin.instance = this;
+        await this.setupReact();
         await this.loadSettings();
-        if (this.settings.patch_html_rendering) {
-            patchSanitization();
-        }
+
         this.ReactComponentContext = this.React.createContext<ReactComponentContextData>(null);
+
+        await setupComponentRendering();
 
         const registerIfCodeBlockFile = file => {
             if (
@@ -92,14 +93,14 @@ export default class ReactComponentsPlugin extends Plugin {
                 registerIfCodeBlockFile(args[1]);
             })
         );
-        await loadComponents();
+        await this.loadComponents();
 
         this.addCommand({
             id: 'refresh-react-components',
             name: 'Refresh React Components',
             callback: async () => {
                 clearComponentNamespace();
-                await loadComponents();
+                await this.loadComponents();
                 requestComponentUpdate();
             }
         });
@@ -111,26 +112,6 @@ export default class ReactComponentsPlugin extends Plugin {
             }
         });
         this.addSettingTab(new ReactComponentsSettingTab(this));
-
-        try {
-            if (this.settings.live_preview) {
-                this.registerMarkdownCodeBlockProcessor('jsx', async (source, el, ctx) => {
-                    const closestLeaf = ctx.containerEl.closest('.workspace-leaf-content') as HTMLElement;
-                    if (closestLeaf && closestLeaf.dataset['mode'] === 'source' && !el.closest('.cm-line')) {
-                        el.innerHTML = '';
-                    } else {
-                        attachComponent(`<Markdown src={${JSON.stringify('```tsx\n' + source + '\n```')}}/>`, el, ctx);
-                    }
-                });
-
-                const ext = getLivePostprocessor();
-                this.registerEditorExtension(ext);
-            }
-        } catch (e) {
-            // eslint-disable-next-line no-console
-            console.log('obsidian-react-components: Could not enable live preview. See error below.');
-            console.error(e);
-        }
         registerCodeProcessor();
         registerHeaderProcessor();
         this.app.workspace.onLayoutReady(async () => refreshPanes());

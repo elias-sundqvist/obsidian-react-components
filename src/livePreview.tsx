@@ -3,7 +3,7 @@ import { RangeSetBuilder } from '@codemirror/rangeset';
 import { tokenClassNodeProp } from '@codemirror/stream-parser';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
 import { FileView, MarkdownPostProcessorContext } from 'obsidian';
-import { attachComponent } from './core';
+import { attachComponent } from './componentRendering';
 
 export function getLivePostprocessor() {
     class JsxWidget extends WidgetType {

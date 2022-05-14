@@ -1,7 +1,7 @@
 import { MarkdownPostProcessorContext, TFile } from 'obsidian';
 import { GLOBAL_NAMESPACE } from 'src/constants';
-import { generateReactComponentContext } from 'src/core';
 import { getPropertyValue } from 'src/fileUtils';
+import { generateReactComponentContext } from 'src/reactComponentContext';
 import ReactComponentsPlugin from '../main';
 import { CodeRenderer } from './CodeRenderer';
 

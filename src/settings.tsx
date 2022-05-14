@@ -1,5 +1,4 @@
 import { PluginSettingTab, Setting } from 'obsidian';
-import { loadComponents } from './core';
 import { patchSanitization, unpatchSanitization } from './htmlRendering';
 import ReactComponentsPlugin from './main';
 
@@ -67,7 +66,7 @@ export class ReactComponentsSettingTab extends PluginSettingTab {
                     .setValue(this.plugin.settings.template_folder)
                     .onChange(new_folder => {
                         this.plugin.settings.template_folder = new_folder;
-                        loadComponents();
+                        this.plugin.loadComponents();
                         this.plugin.saveSettings();
                     });
             });

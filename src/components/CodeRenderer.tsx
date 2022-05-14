@@ -1,4 +1,4 @@
-import { evalAdapter } from "src/core";
+import { evalAdapter } from "src/codeEvaluation";
 import ReactComponentsPlugin from "src/main";
 
 export const CodeRenderer = ({code, namespace, randomKey}: {code: string, namespace: string, randomKey: number}) => {

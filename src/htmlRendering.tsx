@@ -1,4 +1,5 @@
-import { attachComponent, transpileCode } from './core';
+import { transpileCode } from './codeTranspliation';
+import { attachComponent } from './componentRendering';
 
 let oldDomPurifySanitize = null;
 
