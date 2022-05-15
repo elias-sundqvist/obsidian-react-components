@@ -1,3 +1,5 @@
+import { GLOBAL_NAMESPACE } from 'src/constants';
+import { getNamespaceObject } from 'src/namespaces';
 import { asStrong, asWeak, ParentAndChild, WeakParentAndChild } from 'src/parentAndChild';
 import ReactComponentsPlugin from '../main';
 
@@ -82,19 +84,18 @@ export const RootComponent = () => {
     const portals = components.filter(x=>plugin.elementJsxElemMap.has(x.parent.deref())&&plugin.elementJsxElemMap.get(x.parent.deref())).map(x=>plugin.ReactDOM.createPortal(plugin.elementJsxElemMap.get(x.parent.deref()), x.child.deref()))
     
     try {
-       /* const namespaceObject = plugin.getNamespaceObject(GLOBAL_NAMESPACE);
-        const codeBlocks = namespaceObject[CodeBlockSymbol];
-        const GlobalContext = codeBlocks["GlobalContext"] 
+        const namespaceObject = getNamespaceObject(GLOBAL_NAMESPACE);
+        const GlobalContext = namespaceObject["GlobalContext"];
         if(GlobalContext){
-            return (
-                <GlobalContext>
+            return (<GlobalContext>
                     {portals}
                 </GlobalContext>
             );
-        }*/
-    } finally {
-        return (
-            <div>{portals}</div>
-        );
-    }
+        } else {
+        }
+    } catch(e) {
+    } 
+    return (
+        <div>{portals}</div>
+    );
 };

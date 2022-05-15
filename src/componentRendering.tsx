@@ -11,6 +11,39 @@ import { patchSanitization } from './htmlRendering';
 import { getLivePostprocessor } from './livePreview';
 import ReactComponentsPlugin from './main';
 
+export async function setupComponentRendering() {
+    const plugin = ReactComponentsPlugin.instance;
+    plugin.reactRoot = document.createElement('div');
+    const React = plugin.React;
+    plugin.elementJsxElemMap = new WeakMap<HTMLElement, OfflineReact.FunctionComponentElement<any>>();
+    plugin.elementJsxFuncMap = new WeakMap<HTMLElement, () => OfflineReact.FunctionComponentElement<any>>();
+
+    plugin.ReactDOM.render(<RootComponent />, plugin.reactRoot);
+
+    if (plugin.settings.patch_html_rendering) {
+        patchSanitization();
+    }
+    try {
+        if (plugin.settings.live_preview) {
+            plugin.registerMarkdownCodeBlockProcessor('jsx', async (source, el, ctx) => {
+                const closestLeaf = ctx.containerEl.closest('.workspace-leaf-content') as HTMLElement;
+                if (closestLeaf && closestLeaf.dataset['mode'] === 'source' && !el.closest('.cm-line')) {
+                    el.innerHTML = '';
+                } else {
+                    attachComponent(`<Markdown src={${JSON.stringify('```tsx\n' + source + '\n```')}}/>`, el, ctx);
+                }
+            });
+
+            const ext = getLivePostprocessor();
+            plugin.registerEditorExtension(ext);
+        }
+    } catch (e) {
+        // eslint-disable-next-line no-console
+        console.log('obsidian-react-components: Could not enable live preview. See error below.');
+        console.error(e);
+    }
+}
+
 export async function attachComponent(source: string, el: HTMLElement, ctx?: MarkdownPostProcessorContext) {
     const React = ReactComponentsPlugin.instance.React;
     class ErrorBoundary extends React.Component<any, { hasError: boolean; error: Error }> {
@@ -53,39 +86,6 @@ export async function attachComponent(source: string, el: HTMLElement, ctx?: Mar
         ),
         { parent: el, child: container }
     );
-}
-
-export async function setupComponentRendering() {
-    const plugin = ReactComponentsPlugin.instance;
-    plugin.reactRoot = document.createElement('div');
-    const React = plugin.React;
-    plugin.elementJsxElemMap = new WeakMap<HTMLElement, OfflineReact.FunctionComponentElement<any>>();
-    plugin.elementJsxFuncMap = new WeakMap<HTMLElement, () => OfflineReact.FunctionComponentElement<any>>();
-
-    plugin.ReactDOM.render(<RootComponent />, plugin.reactRoot);
-
-    if (plugin.settings.patch_html_rendering) {
-        patchSanitization();
-    }
-    try {
-        if (plugin.settings.live_preview) {
-            plugin.registerMarkdownCodeBlockProcessor('jsx', async (source, el, ctx) => {
-                const closestLeaf = ctx.containerEl.closest('.workspace-leaf-content') as HTMLElement;
-                if (closestLeaf && closestLeaf.dataset['mode'] === 'source' && !el.closest('.cm-line')) {
-                    el.innerHTML = '';
-                } else {
-                    attachComponent(`<Markdown src={${JSON.stringify('```tsx\n' + source + '\n```')}}/>`, el, ctx);
-                }
-            });
-
-            const ext = getLivePostprocessor();
-            plugin.registerEditorExtension(ext);
-        }
-    } catch (e) {
-        // eslint-disable-next-line no-console
-        console.log('obsidian-react-components: Could not enable live preview. See error below.');
-        console.error(e);
-    }
 }
 
 export async function requestComponentUpdate() {
