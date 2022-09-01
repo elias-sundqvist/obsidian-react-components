@@ -6,10 +6,12 @@ import { ErrorComponent } from './components/ErrorComponent';
 import { ObsidianContextProvider } from './components/ObsidianContextProvider';
 import { RootComponent } from './components/RootComponent';
 import { GLOBAL_NAMESPACE } from './constants';
+import { getMarkdownPostProcessorContextAssociatedWithElement } from './contextUtils';
 import { getPropertyValue } from './fileUtils';
 import { patchSanitization } from './htmlRendering';
 import { getLivePostprocessor } from './livePreview';
 import ReactComponentsPlugin from './main';
+import { generateRandomDomId } from './randomIdGeneration';
 
 export async function setupComponentRendering() {
     const plugin = ReactComponentsPlugin.instance;
@@ -17,6 +19,20 @@ export async function setupComponentRendering() {
     const React = plugin.React;
     plugin.elementJsxElemMap = new WeakMap<HTMLElement, OfflineReact.FunctionComponentElement<any>>();
     plugin.elementJsxFuncMap = new WeakMap<HTMLElement, () => OfflineReact.FunctionComponentElement<any>>();
+
+    plugin.componentsWaitingToLoad = new Map();
+
+    plugin.mutationObserver = new MutationObserver(function () {
+        for (const id of plugin.componentsWaitingToLoad.keys()) {
+            const el = document.getElementById(id);
+            if (el) {
+                attachComponent(plugin.componentsWaitingToLoad.get(id), el);
+                plugin.componentsWaitingToLoad.delete(id);
+            }
+        }
+    });
+
+    plugin.mutationObserver.observe(document, { subtree: true, childList: true });
 
     plugin.ReactDOM.render(<RootComponent />, plugin.reactRoot);
 
@@ -44,8 +60,30 @@ export async function setupComponentRendering() {
     }
 }
 
+export function attachOnDomElLoaded(source: string, el: HTMLElement) {
+    el.id = generateRandomDomId();
+    attachOnDomIdLoaded(source, el.id);
+}
+
+export function attachOnDomIdLoaded(source: string, id: string) {
+    const plugin = ReactComponentsPlugin.instance;
+    plugin.componentsWaitingToLoad.set(id, source);
+}
+
+export async function unloadComponentRendering() {
+    const plugin = ReactComponentsPlugin.instance;
+    plugin.mutationObserver.disconnect();
+}
+
 export async function attachComponent(source: string, el: HTMLElement, ctx?: MarkdownPostProcessorContext) {
     const React = ReactComponentsPlugin.instance.React;
+    if (!el.isConnected) {
+        console.error('HTML Element must be attached to the dom before react can attach.');
+        return;
+    }
+    if (!ctx) {
+        ctx = getMarkdownPostProcessorContextAssociatedWithElement(el);
+    }
     class ErrorBoundary extends React.Component<any, { hasError: boolean; error: Error }> {
         constructor(props) {
             super(props);
@@ -53,13 +91,11 @@ export async function attachComponent(source: string, el: HTMLElement, ctx?: Mar
         }
 
         static getDerivedStateFromError(error) {
-            // Update state so the next render will show the fallback UI.
             return { hasError: true, error };
         }
 
         render() {
             if (this.state.hasError) {
-                // You can render any custom fallback UI
                 return <ErrorComponent componentName={source} error={this.state.error} />;
             }
             return this.props.children;

@@ -11,7 +11,7 @@ import { awaitFilesLoaded, getPropertyValue } from './fileUtils';
 import { clearComponentNamespace, NamespaceObject } from './namespaces';
 import { importFromUrl } from './urlImport';
 import { registerComponents } from './componentRegistry';
-import { requestComponentUpdate, setupComponentRendering } from './componentRendering';
+import { requestComponentUpdate, setupComponentRendering, unloadComponentRendering } from './componentRendering';
 import { refreshComponentScope } from './scope';
 import { ReactComponentContextData } from './reactComponentContext';
 
@@ -36,6 +36,8 @@ export default class ReactComponentsPlugin extends Plugin {
     updateAllComponents: () => void;
     elementJsxElemMap: WeakMap<HTMLElement, OfflineReact.FunctionComponentElement<any>>;
     elementJsxFuncMap: WeakMap<HTMLElement, () => OfflineReact.FunctionComponentElement<any>>;
+    mutationObserver: MutationObserver;
+    componentsWaitingToLoad: Map<string, string>; // dom ids for all containers to which react should render. 
 
     async setupReact() {
         try {
@@ -119,6 +121,7 @@ export default class ReactComponentsPlugin extends Plugin {
 
     unload() {
         unpatchSanitization();
+        unloadComponentRendering();
         if (this.reactRoot) {
             this.ReactDOM.unmountComponentAtNode(this.reactRoot);
         }

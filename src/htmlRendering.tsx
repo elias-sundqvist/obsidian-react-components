@@ -1,5 +1,5 @@
 import { transpileCode } from './codeTranspliation';
-import { attachComponent } from './componentRendering';
+import { attachOnDomElLoaded } from './componentRendering';
 
 let oldDomPurifySanitize = null;
 
@@ -22,7 +22,7 @@ export function patchSanitization() {
         })();
 
         if (!isPureHtml && isValidReactCode) {
-            attachComponent(html, container);
+            attachOnDomElLoaded(html, container);
             return container;
         } else {
             return oldDomPurifySanitize(html, config);
