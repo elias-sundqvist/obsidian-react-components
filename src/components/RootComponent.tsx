@@ -86,7 +86,7 @@ export const RootComponent = () => {
     try {
         const namespaceObject = getNamespaceObject(GLOBAL_NAMESPACE);
         const GlobalContext = namespaceObject["GlobalContext"];
-        if(GlobalContext){
+        if(GlobalContext && typeof GlobalContext == "function"){
             return (<GlobalContext>
                     {portals}
                 </GlobalContext>
