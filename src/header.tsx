@@ -14,7 +14,7 @@ export const setNoteHeaderComponent = newNoteHeaderComponent => {
 export function registerHeaderProcessor() {
     const plugin = ReactComponentsPlugin.instance;
     plugin.registerMarkdownPostProcessor(async (_, ctx) => {
-        if (!ctx.containerEl?.hasClass('markdown-preview-section')) {
+        if (!ctx.sourcePath || (!ctx.containerEl?.hasClass('markdown-preview-section'))) {
             return;
         }
         const viewContainer = ctx.containerEl.parentElement;
