@@ -1,6 +1,5 @@
-import { syntaxTree } from '@codemirror/language';
-import { RangeSetBuilder } from '@codemirror/rangeset';
-import { tokenClassNodeProp } from '@codemirror/stream-parser';
+import {syntaxTree, tokenClassNodeProp} from "@codemirror/language";
+import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
 import { FileView, MarkdownPostProcessorContext } from 'obsidian';
 import { attachComponent } from './componentRendering';
@@ -81,17 +80,17 @@ export function getLivePostprocessor() {
                     syntaxTree(view.state).iterate({
                         from,
                         to,
-                        enter: (type, from, to) => {
-                            const tokens = type.prop(tokenClassNodeProp);
+                        enter: (node) => {
+                            const tokens = node.type.prop<string>(tokenClassNodeProp);
                             const props = new Set(tokens?.split(' '));
                             const propNames = new Set(
                                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                Object.values((type as any).props || {})
+                                Object.values((node.type as any).props || {})
                                     .filter(x => typeof x === 'string')
                                     .flatMap((x: string) => x.split(' '))
                             );
                             if (propNames.has('HyperMD-codeblock-begin')) {
-                                const codeblockHeader = view.state.doc.sliceString(from, to);
+                                const codeblockHeader = view.state.doc.sliceString(node.from, node.to);
                                 const strippedCodeblockHeader = /^`*(.*)/gm.exec(codeblockHeader)?.[1]?.trim();
                                 if (!strippedCodeblockHeader) return;
                                 if (
@@ -104,21 +103,21 @@ export function getLivePostprocessor() {
                                 return;
                             }
                             if (propNames.has('HyperMD-codeblock-end') && codeblockStart) {
-                                const code = view.state.doc.sliceString(codeblockStart.to, from)?.trim();
+                                const code = view.state.doc.sliceString(codeblockStart.to, node.from)?.trim();
                                 if (
                                     codeblockStart.strippedCodeblockHeader == 'jsx:' ||
                                     codeblockStart.strippedCodeblockHeader == 'jsx-'
                                 ) {
-                                    createJsxDecoration(code, codeblockStart.from, to, true);
+                                    createJsxDecoration(code, codeblockStart.from, node.to, true);
                                 } else if (codeblockStart.strippedCodeblockHeader.startsWith('jsx::')) {
                                     const componentName = codeblockStart.strippedCodeblockHeader
                                         .substr('jsx::'.length)
                                         .trim();
                                     const source = `<${componentName} src={${JSON.stringify(code)}}/>`;
-                                    createJsxDecoration(source, codeblockStart.from, to, true);
+                                    createJsxDecoration(source, codeblockStart.from, node.to, true);
                                 } else if (codeblockStart.strippedCodeblockHeader.startsWith('jsx')) {
                                     const source = `<Markdown src={${JSON.stringify('```tsx\n' + code + '\n```')}}/>`;
-                                    createJsxDecoration(source, codeblockStart.from, to, true);
+                                    createJsxDecoration(source, codeblockStart.from, node.to, true);
                                 }
                                 codeblockStart = null;
                             }
