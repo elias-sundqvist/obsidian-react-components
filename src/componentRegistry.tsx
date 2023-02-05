@@ -42,15 +42,10 @@ export async function registerComponent(
 }
 
 export async function registerComponents(file: TFile, suppressComponentRefresh = false) {
-    if (file.extension != 'md') {
-        new Notice(`"${file.basename}.${file.extension}" is not a markdown file`);
-        return;
-    }
-
-    if (getPropertyValue('defines-react-components', file)) {
-        await registerCodeBlockComponents(file, suppressComponentRefresh);
-    } else if (file.path.startsWith(normalizePath(ReactComponentsPlugin.instance.settings.template_folder))) {
+    if (file.path.startsWith(normalizePath(ReactComponentsPlugin.instance.settings.template_folder))) {
         await registerFullFileComponent(file, suppressComponentRefresh);
+    } else if (file.extension == 'md' && getPropertyValue('defines-react-components', file)) {
+        await registerCodeBlockComponents(file, suppressComponentRefresh);
     }
 }
 
@@ -69,6 +64,11 @@ export async function registerCodeBlockComponents(file: TFile, suppressComponent
 }
 
 export async function registerFullFileComponent(file: TFile, suppressComponentRefresh = false) {
+    if (!['md', 'jsx', 'tsx'].contains(file.extension)) {
+        new Notice(`"${file.basename}.${file.extension}" is not a valid extension`);
+        return;
+    }
+
     if (!isVarName(file.basename)) {
         new Notice(`"${file.basename}" is not a valid function name`);
         return;

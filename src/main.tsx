@@ -56,7 +56,7 @@ export default class ReactComponentsPlugin extends Plugin {
     async loadComponents() {
         try {
             await awaitFilesLoaded();
-            for (const file of ReactComponentsPlugin.instance.app.vault.getMarkdownFiles()) {
+            for (const file of ReactComponentsPlugin.instance.app.vault.getFiles()) {
                 await registerComponents(file, true);
             }
             await refreshComponentScope();
